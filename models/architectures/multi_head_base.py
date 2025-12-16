@@ -30,11 +30,13 @@ class MultiHeadMobileNetArchitecture(MobileNetArchitecture):
     - QAT compatibility for quantization-aware training
     """
     
-    def __init__(self, config: MultiHeadModelConfig):
+    def __init__(self, config: MultiHeadModelConfig, unified_output: bool = False):
         """Initialize the multi-head architecture with configuration.
         
         Args:
             config: Multi-head model configuration
+            unified_output: If True, add unified concatenated output for multi-head models.
+                          Ignored for single-head models.
             
         Raises:
             ValueError: If configuration is invalid
@@ -45,6 +47,9 @@ class MultiHeadMobileNetArchitecture(MobileNetArchitecture):
         
         # Call parent constructor
         super().__init__(config)
+        
+        # Store unified output flag (only meaningful for multi-head models)
+        self._unified_output = unified_output and len(config.head_configs) > 1
     
     @property
     def multi_head_config(self) -> MultiHeadModelConfig:
@@ -168,7 +173,8 @@ class MultiHeadMobileNetArchitecture(MobileNetArchitecture):
         1. Building the shared backbone
         2. Creating multiple classification heads
         3. Connecting heads to backbone outputs
-        4. Creating a model with multiple outputs
+        4. Optionally creating a unified concatenated output
+        5. Creating a model with multiple outputs
         
         Returns:
             Compiled TensorFlow Keras model with multiple outputs
@@ -187,9 +193,17 @@ class MultiHeadMobileNetArchitecture(MobileNetArchitecture):
         
         # Create multiple heads
         outputs = {}
+        head_outputs_list = []
         for head_config in self.head_configs:
             head_output = self.build_head(head_config, backbone_output)
             outputs[head_config.name] = head_output
+            head_outputs_list.append(head_output)
+        
+        # Add unified output if requested and model has multiple heads
+        if self._unified_output:
+            # Concatenate all head outputs in order
+            unified_heads = layers.Concatenate(name='unified_heads')(head_outputs_list)
+            outputs['unified_heads'] = unified_heads
         
         # Create the complete model
         model = Model(inputs=input_layer, outputs=outputs, name=self.name)

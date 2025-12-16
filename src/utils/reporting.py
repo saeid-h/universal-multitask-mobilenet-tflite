@@ -110,25 +110,59 @@ def save_model_report(
     # Use TFLite output details instead of Keras model outputs
     # TFLite outputs will show the correct quantized dtype (uint8)
     tflite_outputs = {}
+    unified_heads_info = None
     if 'output_details' in quantization_info and quantization_info['output_details']:
         output_details = quantization_info['output_details']
         # TFLite outputs are in the same order as the model outputs
         # Match by index to head_configs
+        head_idx = 0
         for idx, output_detail in enumerate(output_details):
-            if idx < len(architecture.head_configs):
-                head_name = architecture.head_configs[idx].name
-            else:
-                head_name = f"output_{idx}"
-            
+            output_tensor_name = output_detail.get('name', f'output_{idx}')
             dtype_str = _normalize_dtype_string(output_detail['dtype'])
-            tflite_outputs[head_name] = {
-                'shape': output_detail['shape'],
-                'dtype': dtype_str
-            }
+            
+            # Check if this is the unified_heads output
+            if output_tensor_name == 'unified_heads':
+                # Document unified output and head order
+                head_order = [h.name for h in architecture.head_configs]
+                head_classes = [h.num_classes for h in architecture.head_configs]
+                unified_heads_info = {
+                    'head_order': head_order,
+                    'head_classes': head_classes,
+                    'total_classes': sum(head_classes),
+                    'shape': output_detail['shape'],
+                    'dtype': dtype_str
+                }
+                tflite_outputs['unified_heads'] = {
+                    'shape': output_detail['shape'],
+                    'dtype': dtype_str
+                }
+            elif head_idx < len(architecture.head_configs):
+                head_name = architecture.head_configs[head_idx].name
+                tflite_outputs[head_name] = {
+                    'shape': output_detail['shape'],
+                    'dtype': dtype_str
+                }
+                head_idx += 1
+            else:
+                tflite_outputs[output_tensor_name] = {
+                    'shape': output_detail['shape'],
+                    'dtype': dtype_str
+                }
     
     # Fallback to Keras outputs if TFLite outputs not available
     if not tflite_outputs:
         tflite_outputs = output_validation
+        # Check for unified_heads in Keras model outputs
+        if 'unified_heads' in output_validation:
+            head_order = [h.name for h in architecture.head_configs]
+            head_classes = [h.num_classes for h in architecture.head_configs]
+            unified_heads_info = {
+                'head_order': head_order,
+                'head_classes': head_classes,
+                'total_classes': sum(head_classes),
+                'shape': output_validation['unified_heads'].get('shape', []),
+                'dtype': 'float32'  # Keras model outputs are float32 before quantization
+            }
     
     report = {
         'model_info': {
@@ -158,6 +192,10 @@ def save_model_report(
         'quantization': quantization_info['quantization']
     }
     
+    # Add unified output info if present
+    if unified_heads_info:
+        report['model_info']['unified_output'] = unified_heads_info
+    
     # Save JSON report
     report_serializable = _convert_to_serializable(report)
     report_path = output_dir / f"{output_name}_report.json"
@@ -182,6 +220,19 @@ def save_model_report(
     
     for h in architecture.head_configs:
         summary_lines.append(f"  {h.name}: {h.num_classes} classes ({h.activation})")
+    
+    # Add unified output info if present
+    if unified_heads_info:
+        summary_lines.extend([
+            f"",
+            f"Unified Output:",
+            f"  Name: unified_heads",
+            f"  Total classes: {unified_heads_info['total_classes']}",
+            f"  Head order: {' → '.join(unified_heads_info['head_order'])}",
+            f"  Class counts: {unified_heads_info['head_classes']}",
+            f"  Shape: {unified_heads_info['shape']}",
+            f"  Note: All head outputs concatenated in order for NPU compatibility"
+        ])
     
     quant_info = quantization_info['quantization']
     

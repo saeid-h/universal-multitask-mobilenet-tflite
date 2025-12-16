@@ -39,6 +39,10 @@ def _validate_args(args):
     if args.keras_model_path and args.heads:
         print("Warning: --heads argument ignored when loading trained model with --keras-model-path")
     
+    if args.keras_model_path and args.unified_output:
+        print("Warning: --unified-output is only available for newly created models, not loaded models")
+        print("  The flag will be ignored for this loaded model.")
+    
     if not args.keras_model_path and not args.heads:
         print("Error: Either --heads (for new model) or --keras-model-path (for trained model) must be provided")
         return False
@@ -77,6 +81,11 @@ def _create_new_model(args, input_shape):
     head_classes, head_names = _parse_head_config(args.heads, args.head_names)
     print(f"  Heads: {head_classes}")
     
+    # Check unified output for single-head models
+    if args.unified_output and len(head_classes) == 1:
+        print("  Note: --unified-output ignored for single-head models (not needed)")
+        args.unified_output = False
+    
     # Create head configurations
     head_configs = create_head_config_from_list(head_classes, head_names)
     
@@ -98,8 +107,12 @@ def _create_new_model(args, input_shape):
     )
     
     # Create architecture
-    architecture = MultiHeadMobileNetV3QATArchitecture(config)
+    architecture = MultiHeadMobileNetV3QATArchitecture(config, unified_output=args.unified_output)
     print(f"  Architecture: {architecture.name}")
+    if args.unified_output:
+        head_order = [h.name for h in head_configs]
+        print(f"  Unified output: Enabled (concatenated {len(head_classes)} heads)")
+        print(f"    Head order: {' -> '.join(head_order)}")
     
     # Build model
     print("Building model...")
@@ -311,6 +324,17 @@ def main():
         dest='vela_compatible',
         action='store_false',
         help='Include softmax activation in model (not compatible with Vela compilation)'
+    )
+    
+    # Unified output option
+    parser.add_argument(
+        '--unified-output',
+        action='store_true',
+        default=False,
+        help='Add unified concatenated output for multi-head models. All head outputs '
+             'are concatenated into a single tensor named "unified_heads". '
+             'Useful for NPUs that do not support multiple output tensors. '
+             'Ignored for single-head models. (default: False)'
     )
     
     args = parser.parse_args()
