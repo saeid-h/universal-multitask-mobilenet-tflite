@@ -29,7 +29,7 @@ mkdir -p "$BASE_DIR"
 mkdir -p "$COPY_DIR"
 
 # Case 1: 96x96x1 -> 2 (96 resolution, 1 channel, 1 head)
-echo "[1/8] Creating 96_1_1 (96x96x1 grayscale single head)..."
+echo "[1/10] Creating 96_1_1 (96x96x1 grayscale single head)..."
 python src/create_quantized_mobilenet_v3.py \
     --alpha 0.25 \
     --input-shape "96x96x1" \
@@ -46,7 +46,7 @@ fi
 
 # Case 2: 96x96x1 -> 5,2,5,3,2 (96 resolution, 1 channel, 5 heads)
 echo ""
-echo "[2/8] Creating 96_1_5 (96x96x1 grayscale multi-head)..."
+echo "[2/10] Creating 96_1_5 (96x96x1 grayscale multi-head)..."
 python src/create_quantized_mobilenet_v3.py \
     --alpha 0.25 \
     --input-shape "96x96x1" \
@@ -63,7 +63,7 @@ fi
 
 # Case 3: 96x96x3 -> 2 (96 resolution, 3 channels, 1 head)
 echo ""
-echo "[3/8] Creating 96_3_1 (96x96x3 RGB single head)..."
+echo "[3/10] Creating 96_3_1 (96x96x3 RGB single head)..."
 python src/create_quantized_mobilenet_v3.py \
     --alpha 0.25 \
     --input-shape "96x96x3" \
@@ -80,7 +80,7 @@ fi
 
 # Case 4: 96x96x3 -> 5,2,5,3,2 (96 resolution, 3 channels, 5 heads)
 echo ""
-echo "[4/8] Creating 96_3_5 (96x96x3 RGB multi-head)..."
+echo "[4/10] Creating 96_3_5 (96x96x3 RGB multi-head)..."
 python src/create_quantized_mobilenet_v3.py \
     --alpha 0.25 \
     --input-shape "96x96x3" \
@@ -97,7 +97,7 @@ fi
 
 # Case 5: 128x128x3 -> 2 (128 resolution, 3 channels, 1 head)
 echo ""
-echo "[5/8] Creating 128_3_1 (128x128x3 RGB single head)..."
+echo "[5/10] Creating 128_3_1 (128x128x3 RGB single head)..."
 python src/create_quantized_mobilenet_v3.py \
     --alpha 0.25 \
     --input-shape "128x128x3" \
@@ -114,7 +114,7 @@ fi
 
 # Case 6: 128x128x3 -> 5,2,5,3,2 (128 resolution, 3 channels, 5 heads)
 echo ""
-echo "[6/8] Creating 128_3_5 (128x128x3 RGB multi-head)..."
+echo "[6/10] Creating 128_3_5 (128x128x3 RGB multi-head)..."
 python src/create_quantized_mobilenet_v3.py \
     --alpha 0.25 \
     --input-shape "128x128x3" \
@@ -129,9 +129,26 @@ else
     echo "  Failed to create 128_3_5 model"
 fi
 
-# Case 7: 224x224x3 -> 5,2,5,3,2 (224 resolution, 3 channels, 5 heads)
+# Case 7: 224x224x1 -> 5,2,5,3,2 (224 resolution, 3 channels, 5 heads)
 echo ""
-echo "[7/8] Creating 224_3_5 (224x224x3 RGB multi-head)..."
+echo "[7/10] Creating 224_1_5 (224x224x3 RGB multi-head)..."
+python src/create_quantized_mobilenet_v3.py \
+    --alpha 0.25 \
+    --input-shape "224x224x1" \
+    --heads "5,2,5,3,2" \
+    --output-dir "$BASE_DIR/224_1_5" \
+    --output-name "224_1_5" \
+    --no-save-keras
+
+if [ $? -eq 0 ]; then
+    echo "  224_1_5 model created"
+else
+    echo "  Failed to create 224_1_5 model"
+fi
+
+# Case 8: 224x224x3 -> 5,2,5,3,2 (224 resolution, 3 channels, 5 heads)
+echo ""
+echo "[8/10] Creating 224_3_5 (224x224x3 RGB multi-head)..."
 python src/create_quantized_mobilenet_v3.py \
     --alpha 0.25 \
     --input-shape "224x224x3" \
@@ -146,9 +163,26 @@ else
     echo "  Failed to create 224_3_5 model"
 fi
 
-# Case 8: 256x256x3 -> 5,2,5,3,2 (256 resolution, 3 channels, 5 heads)
+# Case 9: 256x256x1 -> 5,2,5,3,2 (256 resolution, 3 channels, 5 heads)
 echo ""
-echo "[8/8] Creating 256_3_5 (256x256x3 RGB multi-head)..."
+echo "[9/10] Creating 256_1_5 (256x256x3 RGB multi-head)..."
+python src/create_quantized_mobilenet_v3.py \
+    --alpha 0.25 \
+    --input-shape "256x256x1" \
+    --heads "5,2,5,3,2" \
+    --output-dir "$BASE_DIR/256_1_5" \
+    --output-name "256_1_5" \
+    --no-save-keras
+
+if [ $? -eq 0 ]; then
+    echo "  256_1_5 model created"
+else
+    echo "  Failed to create 256_1_5 model"
+fi
+
+# Case 10: 256x256x3 -> 5,2,5,3,2 (256 resolution, 3 channels, 5 heads)
+echo ""
+echo "[10/10] Creating 256_3_5 (256x256x3 RGB multi-head)..."
 python src/create_quantized_mobilenet_v3.py \
     --alpha 0.25 \
     --input-shape "256x256x3" \
