@@ -139,7 +139,30 @@ python src/create_quantized_mobilenet_v3.py \
 
 Useful when you only need the TFLite file for deployment and don't need the Keras model for further training.
 
-## Example 9: Custom Output Naming
+## Example 9: Unified Output for NPU Compatibility
+
+For NPUs or inference engines that don't support multiple output tensors, use the unified output option:
+
+```bash
+python src/create_quantized_mobilenet_v3.py \
+    --alpha 0.25 \
+    --input-shape "224x224x3" \
+    --heads "5,2,5,3,2" \
+    --head-names "object_class,person_detection,age_group,gender,lighting" \
+    --unified-output \
+    --output-dir ./models
+```
+
+This creates a model with:
+- Individual head outputs: `object_class`, `person_detection`, `age_group`, `gender`, `lighting` (for training)
+- Unified output: `unified_heads` (concatenated [5, 2, 5, 3, 2] = 17 classes total)
+- All outputs are uint8 logits (Vela-compatible)
+
+**Use case**: Deployment on NPUs that require a single output tensor. The unified output contains all head predictions concatenated in order, while individual heads remain accessible for training.
+
+**Note**: The head order in unified output matches the order in `--heads`. This order is documented in the model report.
+
+## Example 10: Custom Output Naming
 
 Specify your own output filename prefix.
 
@@ -153,7 +176,7 @@ python src/create_quantized_mobilenet_v3.py \
 
 This creates files named `my_custom_model_int8.tflite`, `my_custom_model_report.json`, etc.
 
-## Example 10: Multiple Model Variants
+## Example 11: Multiple Model Variants
 
 Generate several variants to compare:
 
@@ -173,7 +196,7 @@ python src/create_quantized_mobilenet_v3.py \
 
 Compare model sizes, inference speed, and accuracy to choose the best fit for your application.
 
-## Example 11: Quantizing a Trained Model
+## Example 12: Quantizing a Trained Model
 
 If you've already trained a model using the training guide, you can quantize it:
 
@@ -205,6 +228,7 @@ Ready-to-use example scripts are available in the `examples/` directory. Each sc
 - `08_quantize_trained_model.sh` - Quantize existing models
 - `09_comprehensive_demo.sh` - Runs multiple examples
 - `create_experiment_models.sh` - Creates all experimental model variants with standardized naming
+- `create_experiment_unified_heads_models.sh` - Creates multi-head models with unified output for NPU compatibility
 
 Run any script with:
 ```bash

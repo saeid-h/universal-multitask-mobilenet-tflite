@@ -152,6 +152,27 @@ Control whether the model includes softmax activation.
 
 For deployment on Arm Ethos-U NPU or when using Vela compiler, use the default Vela-compatible mode.
 
+#### `--unified-output`
+
+Add a unified concatenated output for multi-head models.
+
+**Default**: Not enabled (False)
+
+**Behavior**:
+- When enabled, creates an additional output tensor named `unified_heads`
+- All head outputs are concatenated in order into a single tensor
+- Individual head outputs remain available for training
+- Only applies to multi-head models (ignored for single-head models)
+- Only available for newly created models (not for loaded models)
+
+**Use case**: Useful for NPUs or inference engines that don't support multiple output tensors. The unified output provides all head predictions in a single tensor while individual heads remain accessible for training.
+
+**Example**: For a model with heads [5, 2, 3] classes:
+- Individual outputs: `head_1` (5 classes), `head_2` (2 classes), `head_3` (3 classes)
+- Unified output: `unified_heads` (10 classes total, concatenated in order)
+
+**Note**: The head order in unified output matches the order specified in `--heads` argument. This order is documented in the model report.
+
 ## Output Files
 
 All output files are saved in the specified `--output-dir` directory.
@@ -162,7 +183,10 @@ The quantized TensorFlow Lite model file. This is the main output, ready for dep
 
 **Format**: TensorFlow Lite FlatBuffer
 **Input**: uint8 tensor(s)
-**Output**: uint8 tensor(s) representing logits (softmax applied in post-processing for Vela-compatible models)
+**Output**: 
+- Multiple uint8 tensors (one per head) representing logits
+- Optional `unified_heads` tensor (if `--unified-output` is used) containing all head outputs concatenated
+- Softmax applied in post-processing for Vela-compatible models
 
 ### `{output_name}.keras`
 

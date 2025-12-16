@@ -18,6 +18,8 @@ python src/create_quantized_mobilenet_v3.py \
 
 This creates a model with three heads: 5 classes, 2 classes, and 3 classes, saved as a quantized TFLite file.
 
+For NPUs that require a single output tensor, use the `--unified-output` flag to create a concatenated output while keeping individual heads accessible for training.
+
 ## Requirements
 
 - Python 3.7+

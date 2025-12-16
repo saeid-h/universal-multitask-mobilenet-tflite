@@ -52,9 +52,12 @@ config = MultiHeadModelConfig(
 )
 
 # Create architecture and build model
-architecture = MultiHeadMobileNetV3QATArchitecture(config)
+# Note: unified_output parameter available for NPU compatibility
+architecture = MultiHeadMobileNetV3QATArchitecture(config, unified_output=False)
 model = architecture.get_model()
 ```
+
+**Unified Output Option**: If you need a unified concatenated output for NPU deployment, set `unified_output=True` when creating the architecture. This adds a `unified_heads` output while keeping individual heads accessible for training.
 
 ## Training with Multiple Datasets
 

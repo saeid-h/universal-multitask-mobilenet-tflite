@@ -214,6 +214,32 @@ You need at least one of these arguments.
 - Apply softmax: `probabilities = softmax(logits)`
 - If you specifically need softmax in the model (non-Vela deployment), use `--with-softmax` flag
 
+### Unified output not working
+
+**Problem**: `--unified-output` flag doesn't create unified output.
+
+**Possible causes**:
+- Single-head model (unified output only applies to multi-head models)
+- Loading a trained model (unified output only available for newly created models)
+
+**Solution**:
+- Unified output is automatically ignored for single-head models (not needed)
+- Unified output is only available when creating new models, not when loading trained models with `--keras-model-path`
+- Check the model report to see if unified output was created (look for `unified_output` section in JSON report)
+
+### How to access unified output in inference
+
+**Problem**: Need to know how to extract predictions from unified output.
+
+**Solution**:
+- The unified output contains all head outputs concatenated in order
+- Head order is documented in the model report (`unified_output.head_order`)
+- Example: For heads [5, 2, 3], unified output shape is [batch, 10]
+  - First 5 values: head_1 predictions
+  - Next 2 values: head_2 predictions  
+  - Last 3 values: head_3 predictions
+- Individual head outputs are still available for training
+
 ## Getting Help
 
 If you encounter issues not covered here:

@@ -73,6 +73,14 @@ Creates all experimental models with standardized naming format.
 - **Output**: Models saved to `output/mnv3_experiments/` and copied to `output/mnv3_exp/`
 - **Use case**: Generate multiple model variants for experimentation and comparison
 
+### create_experiment_unified_heads_models.sh
+Creates multi-head experimental models with unified output for NPU compatibility.
+- **Format**: `{resolution}_{channels}_{num_heads}` (e.g., `96_3_5` = 96x96 resolution, 3 channels, 5 heads)
+- **Creates**: 5 multi-head model variants (single-head models skipped)
+- **Feature**: All models include `unified_heads` output (concatenated head outputs)
+- **Output**: Models saved to `output/mnv3_unified_experiments/` and copied to `output/mnv3_unified_exp/` with `_unified` suffix
+- **Use case**: Generate models for NPUs that don't support multiple output tensors
+
 ## Running Examples
 
 ### Individual Examples
@@ -114,9 +122,13 @@ All example outputs are saved to:
 ../output/examples/<example_name>/
 ```
 
-The experimental models script (`create_experiment_models.sh`) saves to:
-- `output/mnv3_experiments/<model_name>/` - Full model outputs with reports
-- `output/mnv3_exp/` - Copied TFLite models with simplified names
+The experimental models scripts save to:
+- `create_experiment_models.sh`:
+  - `output/mnv3_experiments/<model_name>/` - Full model outputs with reports
+  - `output/mnv3_exp/` - Copied TFLite models with simplified names
+- `create_experiment_unified_heads_models.sh`:
+  - `output/mnv3_unified_experiments/<model_name>/` - Full model outputs with reports
+  - `output/mnv3_unified_exp/` - Copied TFLite models with `_unified` suffix
 
 Each output directory contains:
 - `*_int8.tflite` - Quantized TensorFlow Lite model
@@ -156,6 +168,13 @@ bash examples/create_experiment_models.sh
 ```
 
 This creates 8 model variants with standardized naming format for experimentation.
+
+### Generate Models with Unified Output
+```bash
+bash examples/create_experiment_unified_heads_models.sh
+```
+
+This creates 5 multi-head model variants with unified output for NPU compatibility.
 
 ## Next Steps
 

@@ -71,10 +71,25 @@ For multi-head models, outputs are a dictionary:
     'head_1': <tensor with shape (batch, num_classes_1)>,
     'head_2': <tensor with shape (batch, num_classes_2)>,
     ...
+    'unified_heads': <tensor with shape (batch, total_classes)>  # Optional
 }
 ```
 
 Each output tensor contains logits (linear activation, no softmax). After quantization, outputs are uint8 but represent quantized float logits. Use quantization parameters to convert back to float logits, then apply softmax to get probabilities. Models are Vela-compatible by default.
+
+### Unified Output (Optional)
+
+When the `--unified-output` flag is enabled, models include an additional `unified_heads` output that concatenates all head outputs in order. This is useful for:
+
+- **NPU compatibility**: Some NPUs don't support multiple output tensors
+- **Simplified inference**: Single tensor access for all predictions
+- **Training flexibility**: Individual heads remain accessible for loss computation
+
+**Example**: For a model with heads [5, 2, 3] classes:
+- Individual outputs: `head_1` (5 classes), `head_2` (2 classes), `head_3` (3 classes)
+- Unified output: `unified_heads` (10 classes: [5, 2, 3] concatenated)
+
+The head order in unified output matches the order specified during model creation and is documented in the model report.
 
 ## Performance Characteristics
 

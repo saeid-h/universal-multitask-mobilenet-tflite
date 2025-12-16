@@ -73,7 +73,27 @@ python src/create_quantized_mobilenet_v3.py \
 
 Pretrained weights can improve accuracy but create larger models. Alpha 0.25 and 0.50 don't support pretrained weights in Keras.
 
-## Step 5: Adjusting Model Size
+## Step 5: Unified Output for NPU Compatibility
+
+For NPUs that don't support multiple output tensors, you can create models with a unified concatenated output:
+
+```bash
+python src/create_quantized_mobilenet_v3.py \
+    --heads "5,2,3" \
+    --head-names "object_class,person_detection,age_group" \
+    --unified-output \
+    --output-dir ./tutorial_output
+```
+
+This creates a model with:
+- Individual head outputs: `object_class`, `person_detection`, `age_group` (for training)
+- Unified output: `unified_heads` (concatenated [5, 2, 3] = 10 classes)
+
+The unified output is useful for deployment on NPUs that require a single output tensor, while individual heads remain accessible for training.
+
+**Note**: Unified output is only available for multi-head models (ignored for single-head models).
+
+## Step 6: Adjusting Model Size
 
 Choose the alpha parameter based on your needs:
 
