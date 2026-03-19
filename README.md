@@ -41,6 +41,7 @@ Full documentation is available in the [docs/](docs/) directory:
 - [Examples](docs/examples.md) - Various use cases and configurations
 - [Architecture](docs/architecture.md) - How multi-head MobileNet V3 works
 - [Quantization Guide](docs/quantization_guide.md) - Understanding quantization
+- [Pretrained Weights Reference](docs/pretrained_weights_reference.md) - Which configs support pretrained weights
 - [Troubleshooting](docs/troubleshooting.md) - Common issues and solutions
 
 ## Basic Usage

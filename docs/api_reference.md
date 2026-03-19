@@ -173,6 +173,37 @@ Add a unified concatenated output for multi-head models.
 
 **Note**: The head order in unified output matches the order specified in `--heads` argument. This order is documented in the model report.
 
+#### `--separable-weights`
+
+Enable separable weight management. Allows saving/loading backbone and heads separately, feature caching, and dynamic head operations.
+
+**Default**: Not enabled (False)
+
+**Benefits**:
+- Save and load backbone weights independently from heads
+- Cache features for efficient multi-head inference
+- Add new heads dynamically without retraining backbone
+- Freeze backbone/heads for transfer learning
+
+**Example**: `--separable-weights`
+
+**Use cases**:
+- Transfer learning: Freeze backbone, train only new heads
+- Modular deployment: Share backbone across different head configurations
+- Memory-efficient inference: Cache features, load heads dynamically
+
+#### `--save-separate-weights`
+
+Save backbone and head weights to separate files. Requires `--separable-weights`.
+
+**Default**: Not enabled (False)
+
+**Output files**:
+- `{output_name}_weights/backbone_weights.h5`
+- `{output_name}_weights/{head_name}_weights.h5` (one per head)
+
+**Example**: `--separable-weights --save-separate-weights`
+
 ## Output Files
 
 All output files are saved in the specified `--output-dir` directory.

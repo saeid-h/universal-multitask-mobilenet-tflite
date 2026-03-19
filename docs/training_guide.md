@@ -388,6 +388,190 @@ def align_datasets(image_ids, datasets_dict):
     return np.array(aligned_images), aligned_labels
 ```
 
+## Separable Weights and Transfer Learning
+
+The `separable_weights` feature enables powerful transfer learning and modular model management. When enabled, you can:
+
+- Save and load backbone and heads separately
+- Freeze backbone to train only heads
+- Add new heads dynamically
+- Cache features for efficient inference
+
+### Enabling Separable Weights
+
+```python
+config = MultiHeadModelConfig(
+    input_shape=(224, 224, 3),
+    head_configs=head_configs,
+    arch_params={'alpha': 0.25},
+    separable_weights=True  # Enable separable weights
+)
+
+architecture = MultiHeadMobileNetV3QATArchitecture(config)
+model = architecture.get_model()
+```
+
+### Freezing Backbone for Transfer Learning
+
+```python
+# Create model with separable_weights=True
+architecture = MultiHeadMobileNetV3QATArchitecture(config)
+model = architecture.get_model()
+
+# Freeze backbone (shared feature extractor)
+architecture.freeze_backbone()
+
+# Train only the heads
+model.compile(
+    optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
+    loss={head.name: tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True) 
+          for head in architecture.head_configs},
+    metrics=['accuracy']
+)
+
+history = model.fit(train_dataset, validation_data=val_dataset, epochs=10)
+
+# Later, unfreeze for fine-tuning
+architecture.unfreeze_backbone()
+model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=0.0001), ...)
+history = model.fit(train_dataset, validation_data=val_dataset, epochs=10)
+```
+
+### Adding New Heads Dynamically
+
+```python
+# Add a new head without retraining backbone
+new_model = architecture.add_head_dynamically(
+    num_classes=4,
+    head_name="emotion",
+    activation='linear',
+    freeze_backbone=True  # Keep backbone frozen
+)
+
+# Freeze existing heads
+architecture.freeze_head("object_class")
+architecture.freeze_head("person_detection")
+
+# Train only the new head
+new_model.compile(
+    optimizer='adam',
+    loss={head: tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)
+          for head in new_model.output_names},
+    loss_weights={
+        'object_class': 0.0,      # Frozen
+        'person_detection': 0.0,  # Frozen
+        'age_group': 0.0,         # Frozen
+        'emotion': 1.0            # Only train this
+    }
+)
+
+history = new_model.fit(train_data_with_emotion_labels, epochs=10)
+```
+
+### Saving and Loading Weights Separately
+
+```python
+# Save backbone and heads separately
+architecture.save_all_weights_separately('./weights')
+# Creates: ./weights/backbone_weights.h5
+#          ./weights/object_class_weights.h5
+#          ./weights/person_detection_weights.h5
+#          etc.
+
+# Load into a new model
+new_architecture = MultiHeadMobileNetV3QATArchitecture(config)
+new_architecture.load_all_weights_separately('./weights')
+```
+
+### Feature Caching for Inference
+
+For efficient inference with multiple heads, use the FeatureCacheManager:
+
+```python
+from models.utils import FeatureCacheManager
+
+# Create cache manager
+cache_manager = FeatureCacheManager(architecture)
+
+# Extract features once
+features = cache_manager.extract_features(images)
+
+# Run multiple heads on cached features
+cache_manager.load_head("object_class")
+obj_preds = cache_manager.predict_with_cached_features("object_class")
+
+cache_manager.load_head("person_detection")
+person_preds = cache_manager.predict_with_cached_features("person_detection")
+
+# Or run all loaded heads at once
+all_preds = cache_manager.predict_all_loaded_heads()
+```
+
+### Complete Transfer Learning Example
+
+```python
+import tensorflow as tf
+import sys
+from pathlib import Path
+
+project_root = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(project_root))
+
+from models.components.multi_head_model_config import MultiHeadModelConfig
+from models.components.head_configuration import create_head_config_from_list
+from models.architectures.mobilenet_v3_qat_multi import MultiHeadMobileNetV3QATArchitecture
+
+# 1. Create model with separable weights
+head_configs = create_head_config_from_list([5, 2], ["objects", "persons"])
+config = MultiHeadModelConfig(
+    input_shape=(128, 128, 3),
+    head_configs=head_configs,
+    arch_params={'alpha': 0.25},
+    separable_weights=True
+)
+
+architecture = MultiHeadMobileNetV3QATArchitecture(config)
+model = architecture.get_model()
+
+# 2. Train full model
+model.compile(
+    optimizer=tf.keras.optimizers.Adam(0.001),
+    loss={h.name: tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True) 
+          for h in head_configs},
+    metrics=['accuracy']
+)
+model.fit(train_dataset, epochs=20)
+
+# 3. Save backbone for later use
+architecture.save_backbone_weights('./pretrained_backbone.h5')
+
+# 4. Later: Create new model with different heads, load pretrained backbone
+new_head_configs = create_head_config_from_list([3, 4], ["new_task_1", "new_task_2"])
+new_config = MultiHeadModelConfig(
+    input_shape=(128, 128, 3),
+    head_configs=new_head_configs,
+    arch_params={'alpha': 0.25},
+    separable_weights=True
+)
+
+new_architecture = MultiHeadMobileNetV3QATArchitecture(new_config)
+new_model = new_architecture.get_model()
+
+# Load pretrained backbone
+new_architecture.load_backbone_weights('./pretrained_backbone.h5')
+
+# Freeze backbone, train only new heads
+new_architecture.freeze_backbone()
+
+new_model.compile(
+    optimizer=tf.keras.optimizers.Adam(0.001),
+    loss={h.name: tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True) 
+          for h in new_head_configs},
+    metrics=['accuracy']
+)
+new_model.fit(new_train_dataset, epochs=10)
+```
+
 ## Tips
 
 - **Start with equal loss weights**: Begin training with all weights at 1.0, then adjust based on performance
@@ -395,3 +579,4 @@ def align_datasets(image_ids, datasets_dict):
 - **Freeze backbone initially**: For transfer learning, consider freezing the backbone for a few epochs
 - **Use pretrained weights when possible**: If using alpha 0.75 or 1.0, `use_pretrained=True` can help
 - **Balance datasets**: If one head has much more data than others, consider upsampling or adjusting loss weights
+- **Use separable weights for modularity**: Enable `separable_weights=True` when you plan to extend or share backbones

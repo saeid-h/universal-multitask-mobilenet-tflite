@@ -11,6 +11,7 @@ This directory contains complete documentation for the Multi-Head MobileNet V3 q
 - **[Examples](examples.md)** - Various use cases and model configurations
 - **[Architecture](architecture.md)** - How multi-head MobileNet V3 works internally
 - **[Quantization Guide](quantization_guide.md)** - Understanding uint8 quantization
+- **[Pretrained Weights Reference](pretrained_weights_reference.md)** - Which configs support pretrained weights, sizes, and feature vectors
 - **[Troubleshooting](troubleshooting.md)** - Solutions to common problems
 
 ## Quick Navigation
