@@ -25,6 +25,7 @@ class MultiHeadModelConfig(ModelConfig):
         inference_mode: Inference mode ('all_active', 'selective')
         loss_weights: Optional custom loss weights for each head
         head_specific_params: Head-specific parameters for each head
+        separable_weights: Enable separable weight management (save/load backbone and heads separately)
     """
     
     # Multi-head specific parameters
@@ -33,6 +34,7 @@ class MultiHeadModelConfig(ModelConfig):
     inference_mode: str = 'all_active'
     loss_weights: Optional[Dict[str, float]] = None
     head_specific_params: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    separable_weights: bool = False
     
     def validate(self) -> None:
         """Validate multi-head configuration parameters.
@@ -224,7 +226,8 @@ class MultiHeadModelConfig(ModelConfig):
             'loss_weights': self.loss_weights,
             'head_specific_params': self.head_specific_params.copy(),
             'total_classes': self.get_total_classes(),
-            'head_names': self.get_head_names()
+            'head_names': self.get_head_names(),
+            'separable_weights': self.separable_weights
         }
         
         base_config.update(multi_head_config)

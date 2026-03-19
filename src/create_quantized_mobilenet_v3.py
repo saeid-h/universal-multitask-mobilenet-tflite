@@ -103,8 +103,12 @@ def _create_new_model(args, input_shape):
             'use_pretrained': args.use_pretrained,
         },
         training_mode='joint',
-        inference_mode='all_active'
+        inference_mode='all_active',
+        separable_weights=args.separable_weights
     )
+    
+    if args.separable_weights:
+        print(f"  Separable weights: Enabled")
     
     # Create architecture
     architecture = MultiHeadMobileNetV3QATArchitecture(config, unified_output=args.unified_output)
@@ -163,6 +167,16 @@ def _quantize_and_report(
         keras_path = output_dir / f"{output_name}.keras"
         print(f"Saving Keras model to {keras_path}...")
         model.save(str(keras_path))
+    
+    # Save separate weights if requested
+    if args.save_separate_weights and architecture is not None:
+        if not architecture.is_separable:
+            print("Warning: --save-separate-weights requires --separable-weights. Skipping.")
+        else:
+            weights_dir = output_dir / f"{output_name}_weights"
+            print(f"Saving separate weights to {weights_dir}...")
+            saved_files = architecture.save_all_weights_separately(str(weights_dir))
+            print(f"  Saved {len(saved_files)} weight files")
     
     # Quantize to TFLite
     print("Quantizing to TFLite (uint8)...")
@@ -335,6 +349,26 @@ def main():
              'are concatenated into a single tensor named "unified_heads". '
              'Useful for NPUs that do not support multiple output tensors. '
              'Ignored for single-head models. (default: False)'
+    )
+    
+    # Separable weights option
+    parser.add_argument(
+        '--separable-weights',
+        action='store_true',
+        default=False,
+        help='Enable separable weight management. Allows saving/loading backbone and '
+             'heads separately, feature caching, and dynamic head operations. '
+             'Useful for transfer learning and extending models with new heads. '
+             '(default: False)'
+    )
+    
+    # Save separate weights option
+    parser.add_argument(
+        '--save-separate-weights',
+        action='store_true',
+        default=False,
+        help='Save backbone and head weights to separate files (requires --separable-weights). '
+             'Creates backbone_weights.h5 and <head_name>_weights.h5 files. (default: False)'
     )
     
     args = parser.parse_args()

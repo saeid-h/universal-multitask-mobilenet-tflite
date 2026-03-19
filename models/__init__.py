@@ -18,6 +18,9 @@ from .architectures.mobilenet_v3_small import MobileNetV3Small, create_mobilenet
 # Import MobileNetV4-Conv-S
 from .architectures.mobilenet_v4 import MobileNetV4ConvS, create_mobilenet_v4_conv_s_configs
 
+# Import utilities
+from .utils import FeatureCacheManager
+
 def _register_mobilenet_v3_small_variants():
     """Register all MobileNetV3-Small variants with the factory."""
     configs = create_mobilenet_v3_small_configs()
@@ -53,6 +56,7 @@ __all__ = [
     'create_mobilenet_v1_025',
     'MobileNetV3Small',
     'MobileNetV4ConvS',
+    'FeatureCacheManager',
 ]
 
 __version__ = '0.2.0' 
