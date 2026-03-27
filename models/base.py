@@ -116,24 +116,18 @@ class ModelConfig:
         
         height, width, channels = self.input_shape
         
-        # Validate resolution (must be square)
-        if height != width:
-            raise ValueError(f"Input must be square, got {height}x{width}")
-        
-        # Validate supported resolutions
-        from src.utils.constants import SUPPORTED_RESOLUTIONS
-        if height not in SUPPORTED_RESOLUTIONS:
-            raise ValueError(f"Unsupported input resolution: {height}. Supported: {SUPPORTED_RESOLUTIONS}")
-        
         # Validate channels
         from src.utils.constants import SUPPORTED_CHANNELS
         if channels not in SUPPORTED_CHANNELS:
             raise ValueError(f"Unsupported channel count: {channels}. Supported: {SUPPORTED_CHANNELS}")
         
-        # Validate against supported configurations
+        # Validate against supported configurations (square and rectangular)
         from src.utils.constants import validate_input_config
         if not validate_input_config(self.input_shape):
-            raise ValueError(f"Unsupported input configuration: {self.input_shape}")
+            raise ValueError(
+                f"Unsupported input configuration: {self.input_shape}. "
+                "See SUPPORTED_INPUT_CONFIGS in src/utils/constants.py"
+            )
 
 
 class MobileNetArchitecture(ABC):

@@ -76,9 +76,11 @@ Input image dimensions and channels.
 - `"224x224x3"` - RGB images, standard ImageNet size
 - `"96x96x1"` - Grayscale images, smaller size
 - `"128x128x3"` - RGB images, smaller size
+- `"189x252x1"`, `"240x320x3"`, `"320x320x3"`, `"368x496x3"` - additional square and rectangular sizes (see `src/utils/constants.py`)
 
 **Requirements**:
-- Height and width must be at least 32 pixels
+- Shape must appear in `SUPPORTED_INPUT_CONFIGS` (`src/utils/constants.py`)
+- Height and width must be at least 32 pixels (all supported configs satisfy this)
 - Channels must be 1 (grayscale) or 3 (RGB)
 - Format must match exactly: numbers separated by 'x'
 

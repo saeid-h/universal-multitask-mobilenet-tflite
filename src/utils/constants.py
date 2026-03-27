@@ -7,24 +7,33 @@ for input configuration validation and management.
 
 from typing import Dict, Tuple, List, Optional
 
-# Supported input configurations
+# Supported input configurations (height x width x channels)
 SUPPORTED_INPUT_CONFIGS = {
     '96x96x1': (96, 96, 1),     # Grayscale 96x96
     '96x96x3': (96, 96, 3),     # RGB 96x96
     '128x128x1': (128, 128, 1), # Grayscale 128x128
     '128x128x3': (128, 128, 3), # RGB 128x128
+    '160x160x1': (160, 160, 1), # Grayscale 160x160
+    '160x160x3': (160, 160, 3), # RGB 160x160
     '224x224x1': (224, 224, 1), # Grayscale 224x224
     '224x224x3': (224, 224, 3), # RGB 224x224
     '256x256x1': (256, 256, 1), # Grayscale 256x256
     '256x256x3': (256, 256, 3), # RGB 256x256
+    '189x252x1': (189, 252, 1), # Grayscale rectangular
+    '368x496x1': (368, 496, 1), # Grayscale rectangular
+    '368x496x3': (368, 496, 3), # RGB rectangular
+    '240x320x1': (240, 320, 1), # Grayscale rectangular
+    '240x320x3': (240, 320, 3), # RGB rectangular
+    '320x320x1': (320, 320, 1), # Grayscale square
+    '320x320x3': (320, 320, 3), # RGB square
 }
 
 # Default configuration (backward compatibility)
 DEFAULT_INPUT_CONFIG = '96x96x1'
 DEFAULT_INPUT_SHAPE = SUPPORTED_INPUT_CONFIGS[DEFAULT_INPUT_CONFIG]
 
-# Supported resolutions
-SUPPORTED_RESOLUTIONS = [96, 128, 224, 256]
+# Distinct heights (first spatial dim) for get_configs_by_resolution
+SUPPORTED_RESOLUTIONS = [96, 128, 160, 189, 224, 240, 256, 320, 368]
 
 # Supported channel counts
 SUPPORTED_CHANNELS = [1, 3]  # Grayscale, RGB
@@ -151,7 +160,7 @@ def get_configs_by_resolution(resolution: int) -> List[str]:
     """Get configuration names for a specific resolution.
     
     Args:
-        resolution: Input resolution (96, 128, 224, 256)
+        resolution: Input height (first dim); see SUPPORTED_RESOLUTIONS
         
     Returns:
         List of configuration names for the resolution

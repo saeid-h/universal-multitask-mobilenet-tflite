@@ -19,6 +19,7 @@ from tensorflow.keras import layers, Model
 
 from ..base import MobileNetArchitecture, ModelConfig
 from ..factory import ModelArchitectureFactory
+from src.utils.constants import get_supported_input_shapes
 
 
 class MobileNetV3QATArchitecture(MobileNetArchitecture):
@@ -47,17 +48,7 @@ class MobileNetV3QATArchitecture(MobileNetArchitecture):
     @property
     def supported_input_shapes(self) -> List[Tuple[int, int, int]]:
         """Return list of supported input shapes for MobileNetV3 QAT."""
-        # MobileNetV3 supports various input resolutions
-        return [
-            (96, 96, 1),    # Person detection optimized size, grayscale
-            (128, 128, 1),  # Alternative resolution, grayscale
-            (160, 160, 1),  # Higher resolution, grayscale
-            (224, 224, 1),  # Standard ImageNet resolution, grayscale
-            (96, 96, 3),    # Person detection optimized size, RGB
-            (128, 128, 3),  # Alternative resolution, RGB
-            (160, 160, 3),  # Higher resolution, RGB
-            (224, 224, 3),  # Standard ImageNet resolution, RGB
-        ]
+        return list(get_supported_input_shapes())
     
     @property
     def parameter_count_range(self) -> Tuple[int, int]:
