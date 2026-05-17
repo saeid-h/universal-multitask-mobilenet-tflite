@@ -73,6 +73,18 @@ def get_loss_for_head_type(head_type: str, from_logits: bool = True, **kwargs) -
         # Heatmap regression (MSE on heatmap values)
         return tf.keras.losses.MeanSquaredError(**kwargs)
     
+    elif head_type == "text_detection":
+        # Text detection uses combined text classification + geometry regression
+        return TextDetectionLoss(**kwargs)
+    
+    elif head_type == "text_recognition":
+        # CTC loss for sequence prediction without alignment
+        return CTCLoss(**kwargs)
+    
+    elif head_type == "scene_text":
+        # Combined detection + recognition loss
+        return SceneTextLoss(**kwargs)
+    
     else:
         raise ValueError(f"Unknown head type: {head_type}")
 
@@ -146,6 +158,15 @@ def get_metrics_for_head_type(head_type: str) -> list:
     
     elif head_type == "keypoint_detection":
         return ['mse', 'mae']  # Heatmap regression metrics
+    
+    elif head_type == "text_detection":
+        return ['binary_accuracy']  # Text/no-text classification
+    
+    elif head_type == "text_recognition":
+        return ['accuracy']  # Character-level accuracy
+    
+    elif head_type == "scene_text":
+        return ['accuracy']  # End-to-end text reading accuracy
     
     else:
         return ['accuracy']  # Default fallback
@@ -384,5 +405,148 @@ class YOLOLoss(tf.keras.losses.Loss):
         config.update({
             'lambda_coord': self.lambda_coord,
             'lambda_noobj': self.lambda_noobj
+        })
+        return config
+
+
+class TextDetectionLoss(tf.keras.losses.Loss):
+    """Combined loss for text detection (classification + geometry regression).
+    
+    Combines binary crossentropy for text/no-text classification with
+    regression losses for text bounding boxes and optional orientation.
+    """
+    
+    def __init__(self, geometry_weight: float = 1.0, angle_weight: float = 0.1,
+                 name: str = "text_detection_loss", **kwargs):
+        super().__init__(name=name, **kwargs)
+        self.geometry_weight = geometry_weight
+        self.angle_weight = angle_weight
+    
+    def call(self, y_true, y_pred):
+        """Compute text detection loss.
+        
+        Args:
+            y_true: Dictionary with 'text_scores', 'text_boxes', and optionally 'text_angles'
+            y_pred: Dictionary with same structure as y_true
+            
+        Returns:
+            Combined text detection loss
+        """
+        # Text classification loss
+        text_cls_loss = tf.keras.losses.binary_crossentropy(
+            y_true['text_scores'], y_pred['text_scores'], from_logits=False
+        )
+        
+        # Text geometry regression loss (only for positive text regions)
+        text_mask = tf.cast(y_true['text_scores'] > 0.5, tf.float32)
+        
+        # Smooth L1 loss for bounding boxes
+        box_diff = y_pred['text_boxes'] - y_true['text_boxes']
+        abs_diff = tf.abs(box_diff)
+        smooth_l1 = tf.where(
+            abs_diff < 1.0,
+            0.5 * tf.square(box_diff),
+            abs_diff - 0.5
+        )
+        geometry_loss = tf.reduce_sum(smooth_l1 * tf.expand_dims(text_mask, -1)) / (tf.reduce_sum(text_mask) + 1e-8)
+        
+        total_loss = text_cls_loss + self.geometry_weight * geometry_loss
+        
+        # Optional angle loss
+        if 'text_angles' in y_pred:
+            angle_diff = y_pred['text_angles'] - y_true['text_angles']
+            angle_loss = tf.reduce_sum(tf.square(angle_diff) * text_mask) / (tf.reduce_sum(text_mask) + 1e-8)
+            total_loss += self.angle_weight * angle_loss
+        
+        return tf.reduce_mean(total_loss)
+    
+    def get_config(self):
+        config = super().get_config()
+        config.update({
+            'geometry_weight': self.geometry_weight,
+            'angle_weight': self.angle_weight
+        })
+        return config
+
+
+class CTCLoss(tf.keras.losses.Loss):
+    """CTC (Connectionist Temporal Classification) loss for text recognition.
+    
+    Handles variable-length sequences without requiring character-level alignment.
+    """
+    
+    def __init__(self, name: str = "ctc_loss", **kwargs):
+        super().__init__(name=name, **kwargs)
+    
+    def call(self, y_true, y_pred):
+        """Compute CTC loss.
+        
+        Args:
+            y_true: True character sequences [batch, max_length]
+            y_pred: Predicted character logits [batch, time_steps, vocab_size]
+            
+        Returns:
+            CTC loss
+        """
+        # Get input lengths (assume full sequences for simplicity)
+        batch_size = tf.shape(y_pred)[0]
+        input_length = tf.fill([batch_size], tf.shape(y_pred)[1])
+        label_length = tf.reduce_sum(tf.cast(y_true != 0, tf.int32), axis=1)  # Count non-blank characters
+        
+        # CTC loss computation
+        ctc_loss = tf.nn.ctc_loss(
+            labels=tf.cast(y_true, tf.int32),
+            logits=y_pred,
+            label_length=label_length,
+            logit_length=input_length,
+            blank_index=0,  # Assume blank is at index 0
+            logits_time_major=False
+        )
+        
+        return tf.reduce_mean(ctc_loss)
+
+
+class SceneTextLoss(tf.keras.losses.Loss):
+    """Combined loss for end-to-end scene text reading.
+    
+    Combines detection loss and recognition loss with appropriate weighting.
+    """
+    
+    def __init__(self, detection_weight: float = 1.0, recognition_weight: float = 1.0,
+                 name: str = "scene_text_loss", **kwargs):
+        super().__init__(name=name, **kwargs)
+        self.detection_weight = detection_weight
+        self.recognition_weight = recognition_weight
+    
+    def call(self, y_true, y_pred):
+        """Compute scene text loss.
+        
+        Args:
+            y_true: Dictionary with 'text_instances' and 'text_sequences'
+            y_pred: Dictionary with same structure as y_true
+            
+        Returns:
+            Combined scene text loss
+        """
+        # Detection loss (for text instance localization)
+        detection_loss = tf.keras.losses.mse(
+            y_true['text_instances'], y_pred['text_instances']
+        )
+        
+        # Recognition loss (for character sequences)
+        recognition_loss = tf.keras.losses.sparse_categorical_crossentropy(
+            y_true['text_sequences'], y_pred['text_sequences'], from_logits=False
+        )
+        
+        total_loss = (self.detection_weight * detection_loss + 
+                     self.recognition_weight * recognition_loss)
+        
+        return tf.reduce_mean(total_loss)
+    
+    def get_config(self):
+        config = super().get_config()
+        config.update({
+            'detection_weight': self.detection_weight,
+            'recognition_weight': self.recognition_weight
         })
         return config

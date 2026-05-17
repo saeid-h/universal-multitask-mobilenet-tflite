@@ -478,6 +478,209 @@ def build_keypoint_detection_head(head_config: HeadConfiguration, backbone_outpu
     return heatmaps
 
 
+@register_head("text_detection")
+def build_text_detection_head(head_config: HeadConfiguration, backbone_output: tf.Tensor) -> tf.Tensor:
+    """Build text detection head for locating text regions in images.
+    
+    Uses a combination of text/no-text classification and text boundary regression.
+    Similar to SSD but specialized for text with oriented bounding boxes support.
+    
+    Custom parameters:
+        - detect_orientation (bool): Predict text orientation angles (default: True)
+        - min_text_size (int): Minimum text region size in pixels (default: 8)
+        - link_threshold (float): Threshold for linking text segments (default: 0.4)
+        - text_threshold (float): Threshold for text confidence (default: 0.7)
+    
+    Args:
+        head_config: Head configuration
+        backbone_output: Backbone feature map tensor
+        
+    Returns:
+        Dictionary with text detection outputs:
+        - text_scores: [batch, H, W, 1] - Text confidence maps
+        - text_boxes: [batch, H, W, 4] - Text bounding boxes (x, y, w, h)
+        - text_angles: [batch, H, W, 1] - Text orientation angles (if enabled)
+    """
+    detect_orientation = head_config.custom_params.get("detect_orientation", True)
+    
+    # Shared feature processing for text detection
+    x = layers.Conv2D(256, 3, padding='same', activation='relu',
+                      name=f"{head_config.name}_conv1")(backbone_output)
+    x = layers.Conv2D(128, 3, padding='same', activation='relu',
+                      name=f"{head_config.name}_conv2")(x)
+    
+    if head_config.dropout_rate > 0:
+        x = layers.Dropout(head_config.dropout_rate, name=f"{head_config.name}_dropout")(x)
+    
+    # Text confidence map (pixel-wise text/no-text classification)
+    text_scores = layers.Conv2D(1, 1, activation='sigmoid',
+                               name=f"{head_config.name}_text_scores")(x)
+    
+    # Text geometry prediction (bounding boxes)
+    text_boxes = layers.Conv2D(4, 1, activation='linear',
+                              name=f"{head_config.name}_text_boxes")(x)
+    
+    outputs = {
+        'text_scores': text_scores,
+        'text_boxes': text_boxes
+    }
+    
+    # Optional orientation prediction
+    if detect_orientation:
+        text_angles = layers.Conv2D(1, 1, activation='tanh',  # Angles in [-1, 1] → [-π, π]
+                                   name=f"{head_config.name}_text_angles")(x)
+        outputs['text_angles'] = text_angles
+    
+    return outputs
+
+
+@register_head("text_recognition")
+def build_text_recognition_head(head_config: HeadConfiguration, backbone_output: tf.Tensor) -> tf.Tensor:
+    """Build text recognition head for reading text from cropped text regions.
+    
+    Uses CTC (Connectionist Temporal Classification) for sequence prediction
+    without requiring character-level alignment. Suitable for variable-length text.
+    
+    Custom parameters:
+        - max_text_length (int): Maximum text sequence length (default: 32)
+        - vocab_size (int): Size of character vocabulary (default: head_config.num_classes)
+        - use_attention (bool): Use attention mechanism (default: False)
+        - rnn_units (int): RNN hidden units (default: 256)
+        - num_rnn_layers (int): Number of RNN layers (default: 2)
+    
+    Args:
+        head_config: Head configuration (num_classes = vocabulary size including blank)
+        backbone_output: Backbone feature map tensor
+        
+    Returns:
+        CTC logits tensor [batch, time_steps, vocab_size] for sequence prediction
+    """
+    max_text_length = head_config.custom_params.get("max_text_length", 32)
+    use_attention = head_config.custom_params.get("use_attention", False)
+    rnn_units = head_config.custom_params.get("rnn_units", 256)
+    num_rnn_layers = head_config.custom_params.get("num_rnn_layers", 2)
+    
+    # Reshape feature map for sequence processing
+    # Assume text regions are horizontally oriented
+    B, H, W, C = backbone_output.shape
+    
+    # Pool vertically and keep horizontal sequence
+    x = layers.GlobalAveragePooling1D(data_format='channels_last')(
+        layers.Permute((2, 1, 3))(backbone_output)  # [B, W, H, C]
+    )  # [B, W, C]
+    
+    # Add positional encoding for sequence understanding
+    x = layers.Dense(rnn_units, activation='relu',
+                    name=f"{head_config.name}_feature_proj")(x)
+    
+    if head_config.dropout_rate > 0:
+        x = layers.Dropout(head_config.dropout_rate, name=f"{head_config.name}_dropout1")(x)
+    
+    # Bidirectional RNN layers for sequence modeling
+    for i in range(num_rnn_layers):
+        x = layers.Bidirectional(
+            layers.LSTM(rnn_units, return_sequences=True, dropout=head_config.dropout_rate),
+            name=f"{head_config.name}_bilstm_{i}"
+        )(x)
+    
+    # Optional attention mechanism
+    if use_attention:
+        # Self-attention over sequence
+        attention_scores = layers.Dense(1, activation='tanh',
+                                      name=f"{head_config.name}_attention")(x)
+        attention_weights = layers.Softmax(axis=1)(attention_scores)
+        x = layers.Multiply()([x, attention_weights])
+    
+    # Final character prediction (CTC compatible)
+    ctc_logits = layers.Dense(head_config.num_classes, activation='linear',
+                             name=f"{head_config.name}_ctc_output")(x)
+    
+    return ctc_logits
+
+
+@register_head("scene_text")
+def build_scene_text_head(head_config: HeadConfiguration, backbone_output: tf.Tensor) -> tf.Tensor:
+    """Build end-to-end scene text reading head (detection + recognition).
+    
+    Combines text detection and recognition in a single head for direct
+    text extraction from natural scene images without separate cropping.
+    
+    Custom parameters:
+        - max_detections (int): Maximum number of text instances (default: 100)
+        - max_chars_per_text (int): Maximum characters per text instance (default: 25)
+        - char_vocab_size (int): Character vocabulary size (default: head_config.num_classes)
+        - detection_threshold (float): Text detection confidence threshold (default: 0.5)
+    
+    Args:
+        head_config: Head configuration 
+        backbone_output: Backbone feature map tensor
+        
+    Returns:
+        Dictionary with end-to-end text reading outputs:
+        - text_instances: [batch, max_detections, 6] - (x1, y1, x2, y2, angle, confidence)
+        - text_sequences: [batch, max_detections, max_chars, vocab_size] - Character predictions
+    """
+    max_detections = head_config.custom_params.get("max_detections", 100)
+    max_chars_per_text = head_config.custom_params.get("max_chars_per_text", 25)
+    
+    # Multi-scale feature processing
+    x = layers.Conv2D(256, 3, padding='same', activation='relu',
+                      name=f"{head_config.name}_conv1")(backbone_output)
+    x = layers.Conv2D(256, 3, padding='same', activation='relu',
+                      name=f"{head_config.name}_conv2")(x)
+    
+    if head_config.dropout_rate > 0:
+        x = layers.Dropout(head_config.dropout_rate, name=f"{head_config.name}_dropout")(x)
+    
+    # Text instance detection branch
+    detection_features = layers.Conv2D(128, 3, padding='same', activation='relu',
+                                     name=f"{head_config.name}_det_conv")(x)
+    
+    # Predict text instance locations and confidence
+    # Format: [x1, y1, x2, y2, angle, confidence]
+    text_instances = layers.Conv2D(6, 1, activation='linear',
+                                 name=f"{head_config.name}_text_instances")(detection_features)
+    
+    # Reshape to [batch, num_detections, 6]
+    B, H, W, _ = text_instances.shape
+    text_instances = layers.Reshape((H * W, 6),
+                                  name=f"{head_config.name}_instances_reshape")(text_instances)
+    
+    # Take top-k detections
+    # This is simplified - in practice, you'd use NMS and confidence filtering
+    text_instances = layers.Lambda(
+        lambda x: x[:, :max_detections, :],  # Take first max_detections
+        name=f"{head_config.name}_top_k_instances"
+    )(text_instances)
+    
+    # Text recognition branch (simplified)
+    recognition_features = layers.Conv2D(128, 3, padding='same', activation='relu',
+                                       name=f"{head_config.name}_rec_conv")(x)
+    
+    # Global features for character prediction
+    global_features = layers.GlobalAveragePooling2D()(recognition_features)
+    
+    # Predict character sequences for each detection
+    # This is simplified - real implementation would use attention/alignment
+    char_features = layers.Dense(256, activation='relu',
+                               name=f"{head_config.name}_char_features")(global_features)
+    
+    # Expand for sequence prediction
+    char_features = layers.RepeatVector(max_detections * max_chars_per_text)(char_features)
+    char_features = layers.Reshape((max_detections, max_chars_per_text, 256))(char_features)
+    
+    # Character prediction for each position
+    text_sequences = layers.TimeDistributed(
+        layers.Dense(head_config.num_classes, activation='softmax'),
+        name=f"{head_config.name}_text_sequences"
+    )(char_features)
+    
+    return {
+        'text_instances': text_instances,
+        'text_sequences': text_sequences
+    }
+
+
 @register_head("ordinal")
 def build_ordinal_regression(head_config: HeadConfiguration, backbone_output: tf.Tensor) -> tf.Tensor:
     """Build ordinal regression head using CORAL (Consistent Rank Logits).

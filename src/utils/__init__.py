@@ -25,7 +25,10 @@ from .losses import (
     ordinal_accuracy,
     ordinal_mae,
     SSDLoss,
-    YOLOLoss
+    YOLOLoss,
+    TextDetectionLoss,
+    CTCLoss,
+    SceneTextLoss
 )
 
 __all__ = [
@@ -50,5 +53,8 @@ __all__ = [
     'ordinal_mae',
     'SSDLoss',
     'YOLOLoss',
+    'TextDetectionLoss',
+    'CTCLoss',
+    'SceneTextLoss',
 ]
 

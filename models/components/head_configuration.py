@@ -58,7 +58,8 @@ class HeadConfiguration:
             raise ValueError(f"loss_weight must be non-negative, got {self.loss_weight}")
         
         valid_head_types = {'standard', 'custom', 'multilabel', 'regression', 'embedding', 'ordinal', 
-                           'ssd_detection', 'yolo_detection', 'segmentation', 'keypoint_detection'}
+                           'ssd_detection', 'yolo_detection', 'segmentation', 'keypoint_detection',
+                           'text_detection', 'text_recognition', 'scene_text'}
         if self.head_type not in valid_head_types:
             raise ValueError(f"head_type must be one of {valid_head_types}, got {self.head_type}")
     
@@ -540,5 +541,113 @@ def create_keypoint_detection_head(name: str, num_keypoints: int,
         activation="sigmoid",
         dropout_rate=dropout_rate,
         head_type="keypoint_detection",
+        custom_params=custom_params
+    )
+
+
+def create_text_detection_head(name: str,
+                             detect_orientation: bool = True,
+                             min_text_size: int = 8,
+                             link_threshold: float = 0.4,
+                             text_threshold: float = 0.7,
+                             dropout_rate: float = 0.1) -> HeadConfiguration:
+    """Create a text detection head configuration.
+    
+    Args:
+        name: Head name
+        detect_orientation: Whether to predict text orientation angles
+        min_text_size: Minimum text region size in pixels
+        link_threshold: Threshold for linking text segments
+        text_threshold: Threshold for text confidence
+        dropout_rate: Dropout rate for regularization
+        
+    Returns:
+        HeadConfiguration for text detection
+    """
+    custom_params = {
+        "detect_orientation": detect_orientation,
+        "min_text_size": min_text_size,
+        "link_threshold": link_threshold,
+        "text_threshold": text_threshold
+    }
+    
+    return HeadConfiguration(
+        name=name,
+        num_classes=1,  # Text/no-text binary classification
+        activation="sigmoid",
+        dropout_rate=dropout_rate,
+        head_type="text_detection",
+        custom_params=custom_params
+    )
+
+
+def create_text_recognition_head(name: str, vocab_size: int,
+                               max_text_length: int = 32,
+                               use_attention: bool = False,
+                               rnn_units: int = 256,
+                               num_rnn_layers: int = 2,
+                               dropout_rate: float = 0.2) -> HeadConfiguration:
+    """Create a text recognition head configuration.
+    
+    Args:
+        name: Head name
+        vocab_size: Size of character vocabulary (including blank for CTC)
+        max_text_length: Maximum text sequence length
+        use_attention: Whether to use attention mechanism
+        rnn_units: RNN hidden units
+        num_rnn_layers: Number of RNN layers
+        dropout_rate: Dropout rate for regularization
+        
+    Returns:
+        HeadConfiguration for text recognition
+    """
+    custom_params = {
+        "max_text_length": max_text_length,
+        "use_attention": use_attention,
+        "rnn_units": rnn_units,
+        "num_rnn_layers": num_rnn_layers
+    }
+    
+    return HeadConfiguration(
+        name=name,
+        num_classes=vocab_size,
+        activation="linear",  # CTC compatible
+        dropout_rate=dropout_rate,
+        head_type="text_recognition",
+        custom_params=custom_params
+    )
+
+
+def create_scene_text_head(name: str, char_vocab_size: int,
+                         max_detections: int = 100,
+                         max_chars_per_text: int = 25,
+                         detection_threshold: float = 0.5,
+                         dropout_rate: float = 0.1) -> HeadConfiguration:
+    """Create an end-to-end scene text reading head configuration.
+    
+    Args:
+        name: Head name
+        char_vocab_size: Character vocabulary size
+        max_detections: Maximum number of text instances
+        max_chars_per_text: Maximum characters per text instance
+        detection_threshold: Text detection confidence threshold
+        dropout_rate: Dropout rate for regularization
+        
+    Returns:
+        HeadConfiguration for scene text reading
+    """
+    custom_params = {
+        "max_detections": max_detections,
+        "max_chars_per_text": max_chars_per_text,
+        "detection_threshold": detection_threshold,
+        "char_vocab_size": char_vocab_size
+    }
+    
+    return HeadConfiguration(
+        name=name,
+        num_classes=char_vocab_size,
+        activation="linear",
+        dropout_rate=dropout_rate,
+        head_type="scene_text",
         custom_params=custom_params
     )
