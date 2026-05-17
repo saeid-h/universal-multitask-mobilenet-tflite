@@ -16,6 +16,15 @@ from .reporting import (
     save_model_report_for_loaded_model,
     generate_output_name
 )
+from .losses import (
+    get_loss_for_head_type,
+    get_losses_for_heads,
+    get_metrics_for_head_type,
+    get_metrics_for_heads,
+    OrdinalCrossEntropy,
+    ordinal_accuracy,
+    ordinal_mae
+)
 
 __all__ = [
     'parse_input_shape',
@@ -30,5 +39,12 @@ __all__ = [
     'save_model_report',
     'save_model_report_for_loaded_model',
     'generate_output_name',
+    'get_loss_for_head_type',
+    'get_losses_for_heads',
+    'get_metrics_for_head_type',
+    'get_metrics_for_heads',
+    'OrdinalCrossEntropy',
+    'ordinal_accuracy',
+    'ordinal_mae',
 ]
 

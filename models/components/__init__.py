@@ -78,6 +78,27 @@ from .uib_blocks import (
     create_ffn_block
 )
 
+# Multi-head configuration
+from .head_configuration import (
+    HeadConfiguration,
+    MultiHeadConfiguration,
+    create_head_config_from_list,
+    create_classification_head,
+    create_multilabel_head,
+    create_regression_head,
+    create_embedding_head,
+    create_ordinal_head
+)
+from .multi_head_model_config import MultiHeadModelConfig
+
+# Head builders
+from .head_builders import (
+    register_head,
+    build_head_for_type,
+    get_registered_head_types,
+    get_head_type_info
+)
+
 __all__ = [
     # Base classes
     'MobileNetComponent',
@@ -129,6 +150,23 @@ __all__ = [
     'create_convnext_block',
     'create_extradw_block',
     'create_ffn_block',
+    
+    # Multi-head configuration
+    'HeadConfiguration',
+    'MultiHeadConfiguration',
+    'create_head_config_from_list',
+    'create_classification_head',
+    'create_multilabel_head',
+    'create_regression_head',
+    'create_embedding_head',
+    'create_ordinal_head',
+    'MultiHeadModelConfig',
+    
+    # Head builders
+    'register_head',
+    'build_head_for_type',
+    'get_registered_head_types',
+    'get_head_type_info',
 ]
 
 __version__ = '0.3.0' 

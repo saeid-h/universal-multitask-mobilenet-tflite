@@ -22,6 +22,8 @@ Comma-separated list of class counts per head. Required when creating a new mode
 - At least one head must be specified
 - Each head must have at least 1 class
 - Values must be positive integers
+
+**Note**: The CLI creates standard classification heads. For other head types (multilabel, regression, embedding, ordinal), use the Python API. See [Head Types Reference](head_types_reference.md) for details.
 - Ignored when `--keras-model-path` is provided
 
 ##### `--keras-model-path`

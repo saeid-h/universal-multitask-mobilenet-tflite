@@ -57,7 +57,7 @@ class HeadConfiguration:
         if self.loss_weight < 0.0:
             raise ValueError(f"loss_weight must be non-negative, got {self.loss_weight}")
         
-        valid_head_types = {'standard', 'custom'}
+        valid_head_types = {'standard', 'custom', 'multilabel', 'regression', 'embedding', 'ordinal'}
         if self.head_type not in valid_head_types:
             raise ValueError(f"head_type must be one of {valid_head_types}, got {self.head_type}")
     
@@ -226,7 +226,8 @@ class MultiHeadConfiguration:
 
 
 def create_head_config_from_list(head_config_list: List[int], 
-                                head_names: Optional[List[str]] = None) -> List[HeadConfiguration]:
+                                head_names: Optional[List[str]] = None,
+                                head_type: str = "standard") -> List[HeadConfiguration]:
     """Create head configurations from a list of class counts.
     
     This utility function creates HeadConfiguration objects from a simple list
@@ -235,6 +236,7 @@ def create_head_config_from_list(head_config_list: List[int],
     Args:
         head_config_list: List of class counts (e.g., [2, 2, 5])
         head_names: Optional list of head names. If None, auto-generates names
+        head_type: Head type for all heads (default: "standard")
         
     Returns:
         List of HeadConfiguration objects
@@ -257,8 +259,147 @@ def create_head_config_from_list(head_config_list: List[int],
         
         head_config = HeadConfiguration(
             name=name,
-            num_classes=num_classes
+            num_classes=num_classes,
+            head_type=head_type
         )
         heads.append(head_config)
     
     return heads
+
+
+def create_classification_head(name: str, num_classes: int, activation: str = "linear", 
+                             dropout_rate: float = 0.2) -> HeadConfiguration:
+    """Create a standard classification head configuration.
+    
+    Args:
+        name: Head name
+        num_classes: Number of output classes
+        activation: Output activation ('linear', 'softmax')
+        dropout_rate: Dropout rate for regularization
+        
+    Returns:
+        HeadConfiguration for classification
+    """
+    return HeadConfiguration(
+        name=name,
+        num_classes=num_classes,
+        activation=activation,
+        dropout_rate=dropout_rate,
+        head_type="standard"
+    )
+
+
+def create_multilabel_head(name: str, num_labels: int, dropout_rate: float = 0.2) -> HeadConfiguration:
+    """Create a multi-label classification head configuration.
+    
+    Args:
+        name: Head name
+        num_labels: Number of binary labels
+        dropout_rate: Dropout rate for regularization
+        
+    Returns:
+        HeadConfiguration for multi-label classification
+    """
+    return HeadConfiguration(
+        name=name,
+        num_classes=num_labels,
+        activation="sigmoid",  # Will be overridden by builder
+        dropout_rate=dropout_rate,
+        head_type="multilabel"
+    )
+
+
+def create_regression_head(name: str, n_outputs: int = 1, 
+                         output_activation: Optional[str] = None,
+                         output_scale: float = 1.0, 
+                         output_bias: float = 0.0,
+                         dropout_rate: float = 0.2) -> HeadConfiguration:
+    """Create a regression head configuration.
+    
+    Args:
+        name: Head name
+        n_outputs: Number of regression outputs
+        output_activation: Output activation ('sigmoid', 'tanh', None)
+        output_scale: Scale factor for outputs
+        output_bias: Bias added to outputs
+        dropout_rate: Dropout rate for regularization
+        
+    Returns:
+        HeadConfiguration for regression
+    """
+    custom_params = {
+        "n_outputs": n_outputs,
+        "output_scale": output_scale,
+        "output_bias": output_bias
+    }
+    if output_activation:
+        custom_params["output_activation"] = output_activation
+    
+    return HeadConfiguration(
+        name=name,
+        num_classes=n_outputs,  # Used as default if n_outputs not in custom_params
+        activation="linear",
+        dropout_rate=dropout_rate,
+        head_type="regression",
+        custom_params=custom_params
+    )
+
+
+def create_embedding_head(name: str, embed_dim: int = 128,
+                        projection_layers: Optional[List[int]] = None,
+                        use_bn: bool = False,
+                        dropout_rate: float = 0.2) -> HeadConfiguration:
+    """Create an embedding head configuration.
+    
+    Args:
+        name: Head name
+        embed_dim: Embedding dimension
+        projection_layers: Hidden layer sizes for MLP projection
+        use_bn: Use batch normalization before L2 normalization
+        dropout_rate: Dropout rate for regularization
+        
+    Returns:
+        HeadConfiguration for embedding
+    """
+    custom_params = {
+        "embed_dim": embed_dim,
+        "use_bn": use_bn
+    }
+    if projection_layers:
+        custom_params["projection_layers"] = projection_layers
+    
+    return HeadConfiguration(
+        name=name,
+        num_classes=embed_dim,  # Placeholder
+        activation="linear",
+        dropout_rate=dropout_rate,
+        head_type="embedding",
+        custom_params=custom_params
+    )
+
+
+def create_ordinal_head(name: str, num_classes: int,
+                      threshold_init: str = "ascending",
+                      dropout_rate: float = 0.2) -> HeadConfiguration:
+    """Create an ordinal regression head configuration.
+    
+    Args:
+        name: Head name
+        num_classes: Number of ordinal classes (must be >= 2)
+        threshold_init: Threshold initialization ('ascending', 'uniform')
+        dropout_rate: Dropout rate for regularization
+        
+    Returns:
+        HeadConfiguration for ordinal regression
+    """
+    if num_classes < 2:
+        raise ValueError(f"Ordinal regression requires num_classes >= 2, got {num_classes}")
+    
+    return HeadConfiguration(
+        name=name,
+        num_classes=num_classes,
+        activation="sigmoid",
+        dropout_rate=dropout_rate,
+        head_type="ordinal",
+        custom_params={"threshold_init": threshold_init}
+    )
