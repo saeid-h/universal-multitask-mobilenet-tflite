@@ -23,7 +23,9 @@ from .losses import (
     get_metrics_for_heads,
     OrdinalCrossEntropy,
     ordinal_accuracy,
-    ordinal_mae
+    ordinal_mae,
+    SSDLoss,
+    YOLOLoss
 )
 
 __all__ = [
@@ -46,5 +48,7 @@ __all__ = [
     'OrdinalCrossEntropy',
     'ordinal_accuracy',
     'ordinal_mae',
+    'SSDLoss',
+    'YOLOLoss',
 ]
 

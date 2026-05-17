@@ -87,7 +87,11 @@ from .head_configuration import (
     create_multilabel_head,
     create_regression_head,
     create_embedding_head,
-    create_ordinal_head
+    create_ordinal_head,
+    create_ssd_detection_head,
+    create_yolo_detection_head,
+    create_segmentation_head,
+    create_keypoint_detection_head
 )
 from .multi_head_model_config import MultiHeadModelConfig
 
@@ -160,6 +164,10 @@ __all__ = [
     'create_regression_head',
     'create_embedding_head',
     'create_ordinal_head',
+    'create_ssd_detection_head',
+    'create_yolo_detection_head',
+    'create_segmentation_head',
+    'create_keypoint_detection_head',
     'MultiHeadModelConfig',
     
     # Head builders

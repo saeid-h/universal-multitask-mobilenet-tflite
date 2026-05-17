@@ -8,7 +8,9 @@ The multi-head architecture supports extensible head types through a registry sy
 
 ## Available Head Types
 
-### 1. Standard Classification (`standard`)
+### Classification & Recognition Heads
+
+#### 1. Standard Classification (`standard`)
 
 **Purpose**: Traditional multi-class classification where each sample belongs to exactly one class.
 
@@ -173,6 +175,168 @@ head = create_ordinal_head(
 
 **Prediction**: Predicted class = sum(sigmoid_outputs > 0.5)
 
+### Detection & Localization Heads
+
+#### 6. SSD Detection (`ssd_detection`)
+
+**Purpose**: Object detection using Single Shot MultiBox Detector architecture for finding and localizing objects.
+
+**Architecture**: Conv2D layers → Classification branch + Localization branch → Multi-scale anchor predictions
+
+**Use Cases**:
+- Face detection (find faces in images)
+- Object detection (cars, people, etc.)
+- Logo detection
+- General bounding box regression
+
+**Configuration**:
+```python
+from models.components.head_configuration import create_ssd_detection_head
+
+# Face detection
+face_head = create_ssd_detection_head(
+    name="face_detector",
+    num_classes=1,  # Binary: face/no-face (+ background)
+    num_anchors=3,
+    anchor_scales=[0.1, 0.2, 0.37],
+    anchor_ratios=[0.5, 1.0, 2.0],
+    dropout_rate=0.1
+)
+
+# Multi-class object detection
+object_head = create_ssd_detection_head(
+    name="object_detector", 
+    num_classes=20,  # PASCAL VOC classes
+    num_anchors=6,
+    dropout_rate=0.1
+)
+```
+
+**Training**:
+- **Loss**: `SSDLoss` (combines classification + localization)
+- **Metrics**: `binary_accuracy` for classification component
+- **Label format**: Dictionary with 'boxes' [N, 4] and 'labels' [N] per image
+
+**Output**: Dictionary with:
+- `scores`: [batch, num_anchors_total, num_classes] - Classification probabilities
+- `boxes`: [batch, num_anchors_total, 4] - Bounding box predictions (x_center, y_center, width, height)
+
+#### 7. YOLO Detection (`yolo_detection`)
+
+**Purpose**: Alternative object detection using YOLO (You Only Look Once) approach.
+
+**Architecture**: Conv2D layers → Grid-based predictions (objectness + classes + coordinates)
+
+**Use Cases**:
+- Real-time object detection
+- Multi-object scenes
+- Alternative to SSD with different trade-offs
+
+**Configuration**:
+```python
+from models.components.head_configuration import create_yolo_detection_head
+
+head = create_yolo_detection_head(
+    name="yolo_detector",
+    num_classes=80,  # COCO classes
+    num_boxes=3,
+    coord_scale=1.0,
+    dropout_rate=0.1
+)
+```
+
+**Training**:
+- **Loss**: `YOLOLoss` (objectness + classification + localization)
+- **Metrics**: `binary_accuracy` for objectness component
+- **Label format**: Grid-based format [batch, grid_h, grid_w, boxes * (5 + classes)]
+
+**Output**: YOLO prediction tensor with objectness, coordinates, and class probabilities per grid cell.
+
+### Dense Prediction Heads
+
+#### 8. Semantic Segmentation (`segmentation`)
+
+**Purpose**: Pixel-wise classification for semantic understanding of image regions.
+
+**Architecture**: Progressive upsampling with Conv2DTranspose → Final 1x1 classification
+
+**Use Cases**:
+- Face parsing (skin, hair, eyes, background)
+- Scene segmentation (road, sidewalk, buildings)
+- Medical image segmentation
+- Background removal
+
+**Configuration**:
+```python
+from models.components.head_configuration import create_segmentation_head
+
+# Face parsing
+face_seg = create_segmentation_head(
+    name="face_parsing",
+    num_classes=7,  # background, skin, hair, eyes, nose, mouth, other
+    upsample_factor=8,
+    intermediate_channels=[256, 128],
+    dropout_rate=0.2
+)
+
+# Scene segmentation  
+scene_seg = create_segmentation_head(
+    name="scene_segmentation",
+    num_classes=21,  # PASCAL VOC segmentation
+    upsample_factor=16,
+    dropout_rate=0.3
+)
+```
+
+**Training**:
+- **Loss**: `SparseCategoricalCrossentropy` (pixel-wise classification)
+- **Metrics**: `accuracy`, `sparse_categorical_accuracy`
+- **Label format**: Pixel-wise class labels [batch, height, width] 
+
+**Output**: Segmentation logits [batch, height, width, num_classes] at input resolution.
+
+#### 9. Keypoint Detection (`keypoint_detection`)
+
+**Purpose**: Detecting and localizing specific keypoints using heatmap regression.
+
+**Architecture**: Feature processing → Upsampling → Heatmap generation (one per keypoint)
+
+**Use Cases**:
+- Facial landmark detection (68 points)
+- Human pose estimation (17 body joints)
+- Hand keypoints (21 hand joints)
+- Object keypoints (corners, features)
+
+**Configuration**:
+```python
+from models.components.head_configuration import create_keypoint_detection_head
+
+# Facial landmarks
+landmarks = create_keypoint_detection_head(
+    name="face_landmarks",
+    num_keypoints=68,
+    upsample_factor=4,
+    heatmap_sigma=1.0,
+    intermediate_dim=256,
+    dropout_rate=0.1
+)
+
+# Human pose
+pose = create_keypoint_detection_head(
+    name="body_pose",
+    num_keypoints=17,  # COCO pose
+    upsample_factor=4,
+    dropout_rate=0.1
+)
+```
+
+**Training**:
+- **Loss**: `MeanSquaredError` (heatmap regression)
+- **Metrics**: `mse`, `mae` 
+- **Label format**: Ground truth heatmaps [batch, height, width, num_keypoints]
+
+**Output**: Keypoint heatmaps [batch, height, width, num_keypoints] where each channel represents one keypoint.
+
 ## Using Head Types
 
 ### Creating Models with Different Head Types
@@ -188,7 +352,10 @@ heads = [
     create_multilabel_head("attributes", num_labels=5),
     create_regression_head("age", n_outputs=1, output_scale=100),
     create_embedding_head("identity", embed_dim=128),
-    create_ordinal_head("quality", num_classes=4)
+    create_ordinal_head("quality", num_classes=4),
+    create_ssd_detection_head("face_detector", num_classes=1),
+    create_segmentation_head("face_parsing", num_classes=7),
+    create_keypoint_detection_head("landmarks", num_keypoints=68)
 ]
 
 config = MultiHeadModelConfig(
@@ -199,6 +366,32 @@ config = MultiHeadModelConfig(
 
 arch = MultiHeadMobileNetV3QATArchitecture(config)
 model = arch.get_model()
+```
+
+### Complete Face Analysis Example
+
+```python
+# Face detection + recognition + analysis system
+face_system_heads = [
+    # Detection: Find faces in images
+    create_ssd_detection_head("face_detector", num_classes=1),
+    
+    # Recognition: Identity embeddings for cropped faces
+    create_embedding_head("face_identity", embed_dim=512, projection_layers=[1024, 512]),
+    
+    # Parsing: Segment face regions
+    create_segmentation_head("face_parsing", num_classes=7, upsample_factor=8),
+    
+    # Landmarks: 68 facial keypoints
+    create_keypoint_detection_head("landmarks", num_keypoints=68),
+    
+    # Attributes: Age, gender, emotion
+    create_classification_head("age_group", num_classes=5),
+    create_classification_head("gender", num_classes=2),
+    create_multilabel_head("emotions", num_labels=7)
+]
+
+# This creates a complete face analysis pipeline in a single model
 ```
 
 ### Automatic Loss and Metrics Selection
@@ -223,13 +416,43 @@ model.compile(
 ### Custom Loss Overrides
 
 ```python
+from src.utils import SSDLoss, YOLOLoss
+
 # Override default losses for specific heads
 loss_overrides = {
     'age': {'loss_type': 'mae'},  # Use MAE instead of MSE for regression
-    'identity': tf.keras.losses.TripletSemiHardLoss()  # Custom loss
+    'identity': tf.keras.losses.TripletSemiHardLoss(),  # Custom triplet loss
+    'face_detector': SSDLoss(alpha=1.0, neg_pos_ratio=3.0),  # Custom SSD loss
+    'object_detector': YOLOLoss(lambda_coord=5.0, lambda_noobj=0.5)  # Custom YOLO loss
 }
 
 losses = get_losses_for_heads(heads, loss_overrides=loss_overrides)
+```
+
+### Detection Head Training Considerations
+
+Detection heads (SSD, YOLO) require special handling:
+
+```python
+# Detection heads return dictionaries, need custom training
+def train_with_detection_heads(model, dataset):
+    for batch_images, batch_labels in dataset:
+        with tf.GradientTape() as tape:
+            predictions = model(batch_images, training=True)
+            
+            # Handle different output types
+            losses = {}
+            for head_name, pred in predictions.items():
+                if isinstance(pred, dict):  # Detection head
+                    # pred contains 'boxes' and 'scores'
+                    losses[head_name] = ssd_loss_fn(batch_labels[head_name], pred)
+                else:  # Regular head
+                    losses[head_name] = standard_loss_fn(batch_labels[head_name], pred)
+            
+            total_loss = sum(losses.values())
+        
+        gradients = tape.gradient(total_loss, model.trainable_variables)
+        optimizer.apply_gradients(zip(gradients, model.trainable_variables))
 ```
 
 ## Extending with Custom Head Types
@@ -283,11 +506,23 @@ head = HeadConfiguration(
 
 ## Performance Considerations
 
-- **Standard classification**: Most efficient, well-optimized in TFLite
-- **Multi-label**: Similar to classification, sigmoid is efficient
-- **Regression**: Lightweight, no softmax needed
+### Computational Complexity
+- **Standard/Multi-label/Ordinal**: Lightweight, GAP + Dense layers
+- **Regression**: Most efficient, linear outputs only
 - **Embedding**: L2 normalization adds minimal overhead
-- **Ordinal**: Slightly more complex due to multiple sigmoid outputs
+- **SSD/YOLO Detection**: Moderate overhead, multiple conv layers + anchors
+- **Segmentation**: Higher memory usage, upsampling to full resolution
+- **Keypoint Detection**: Similar to segmentation, heatmap generation
+
+### Memory Usage
+- **Classification heads**: Minimal memory (GAP reduces spatial dimensions)
+- **Detection heads**: Moderate (anchor predictions across feature map)
+- **Dense prediction heads**: High (full-resolution outputs)
+
+### TFLite Optimization
+- **Most efficient**: Standard, multilabel, regression, embedding, ordinal
+- **Moderate**: SSD/YOLO detection (conv layers supported)
+- **Requires careful optimization**: Segmentation, keypoint (upsampling layers)
 
 ## Quantization Compatibility
 
@@ -299,6 +534,23 @@ All head types are compatible with:
 ## Examples
 
 See the following files for complete examples:
-- `examples/12_alternative_heads.sh` - CLI examples for each head type
-- `examples/demo_alternative_heads.py` - Python training examples
+- `examples/12_alternative_heads.sh` - CLI examples for classification head types
+- `examples/demo_alternative_heads.py` - Python training examples (basic heads)
+- `examples/demo_face_detection_recognition.py` - Face detection + recognition system
 - `docs/training_guide.md` - Integration with training workflows
+
+## Summary of All Head Types
+
+| Head Type | Purpose | Output Format | Use Cases |
+|-----------|---------|---------------|-----------|
+| `standard` | Multi-class classification | Class logits | Object classification, scene recognition |
+| `multilabel` | Multi-label classification | Binary probabilities | Image tagging, multi-attribute prediction |
+| `regression` | Continuous values | Real numbers | Age estimation, pose angles, quality scores |
+| `embedding` | Feature representations | L2-normalized vectors | Face recognition, image retrieval |
+| `ordinal` | Ordered categories | Threshold probabilities | Ratings, severity levels, age groups |
+| `ssd_detection` | Object detection | Boxes + scores dict | Face detection, object localization |
+| `yolo_detection` | Alternative detection | Grid predictions | Real-time object detection |
+| `segmentation` | Pixel-wise classification | Full-resolution masks | Face parsing, scene segmentation |
+| `keypoint_detection` | Point localization | Heatmaps | Facial landmarks, pose estimation |
+
+The system now supports the complete spectrum of computer vision tasks from simple classification to complex dense prediction problems!

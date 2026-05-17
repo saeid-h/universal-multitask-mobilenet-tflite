@@ -57,7 +57,8 @@ class HeadConfiguration:
         if self.loss_weight < 0.0:
             raise ValueError(f"loss_weight must be non-negative, got {self.loss_weight}")
         
-        valid_head_types = {'standard', 'custom', 'multilabel', 'regression', 'embedding', 'ordinal'}
+        valid_head_types = {'standard', 'custom', 'multilabel', 'regression', 'embedding', 'ordinal', 
+                           'ssd_detection', 'yolo_detection', 'segmentation', 'keypoint_detection'}
         if self.head_type not in valid_head_types:
             raise ValueError(f"head_type must be one of {valid_head_types}, got {self.head_type}")
     
@@ -402,4 +403,142 @@ def create_ordinal_head(name: str, num_classes: int,
         dropout_rate=dropout_rate,
         head_type="ordinal",
         custom_params={"threshold_init": threshold_init}
+    )
+
+
+def create_ssd_detection_head(name: str, num_classes: int = 1,
+                            num_anchors: int = 3,
+                            anchor_scales: Optional[List[float]] = None,
+                            anchor_ratios: Optional[List[float]] = None,
+                            dropout_rate: float = 0.1) -> HeadConfiguration:
+    """Create an SSD detection head configuration.
+    
+    Args:
+        name: Head name
+        num_classes: Number of classes (1 for face detection, >1 for multi-class)
+        num_anchors: Number of anchor boxes per spatial location
+        anchor_scales: Scale factors for anchors
+        anchor_ratios: Aspect ratios for anchors
+        dropout_rate: Dropout rate for regularization
+        
+    Returns:
+        HeadConfiguration for SSD detection
+    """
+    anchor_scales = anchor_scales or [0.1, 0.2, 0.37]
+    anchor_ratios = anchor_ratios or [0.5, 1.0, 2.0]
+    
+    custom_params = {
+        "num_anchors": num_anchors,
+        "anchor_scales": anchor_scales,
+        "anchor_ratios": anchor_ratios,
+        "box_loss_weight": 1.0,
+        "conf_threshold": 0.5
+    }
+    
+    return HeadConfiguration(
+        name=name,
+        num_classes=num_classes,
+        activation="linear",
+        dropout_rate=dropout_rate,
+        head_type="ssd_detection",
+        custom_params=custom_params
+    )
+
+
+def create_yolo_detection_head(name: str, num_classes: int,
+                             num_boxes: int = 3,
+                             coord_scale: float = 1.0,
+                             dropout_rate: float = 0.1) -> HeadConfiguration:
+    """Create a YOLO detection head configuration.
+    
+    Args:
+        name: Head name
+        num_classes: Number of object classes
+        num_boxes: Number of bounding boxes per grid cell
+        coord_scale: Scaling factor for coordinates
+        dropout_rate: Dropout rate for regularization
+        
+    Returns:
+        HeadConfiguration for YOLO detection
+    """
+    custom_params = {
+        "num_boxes": num_boxes,
+        "coord_scale": coord_scale
+    }
+    
+    return HeadConfiguration(
+        name=name,
+        num_classes=num_classes,
+        activation="linear",
+        dropout_rate=dropout_rate,
+        head_type="yolo_detection",
+        custom_params=custom_params
+    )
+
+
+def create_segmentation_head(name: str, num_classes: int,
+                           upsample_factor: int = 8,
+                           intermediate_channels: Optional[List[int]] = None,
+                           dropout_rate: float = 0.2) -> HeadConfiguration:
+    """Create a semantic segmentation head configuration.
+    
+    Args:
+        name: Head name
+        num_classes: Number of semantic classes
+        upsample_factor: Factor to upsample feature maps to input resolution
+        intermediate_channels: Channels for progressive upsampling layers
+        dropout_rate: Dropout rate for regularization
+        
+    Returns:
+        HeadConfiguration for semantic segmentation
+    """
+    intermediate_channels = intermediate_channels or [256, 128]
+    
+    custom_params = {
+        "upsample_factor": upsample_factor,
+        "intermediate_channels": intermediate_channels,
+        "use_skip_connections": False
+    }
+    
+    return HeadConfiguration(
+        name=name,
+        num_classes=num_classes,
+        activation="linear",
+        dropout_rate=dropout_rate,
+        head_type="segmentation",
+        custom_params=custom_params
+    )
+
+
+def create_keypoint_detection_head(name: str, num_keypoints: int,
+                                 upsample_factor: int = 4,
+                                 heatmap_sigma: float = 1.0,
+                                 intermediate_dim: int = 256,
+                                 dropout_rate: float = 0.1) -> HeadConfiguration:
+    """Create a keypoint detection head configuration.
+    
+    Args:
+        name: Head name
+        num_keypoints: Number of keypoints to detect
+        upsample_factor: Upsampling factor for heatmaps
+        heatmap_sigma: Gaussian sigma for ground truth heatmaps
+        intermediate_dim: Intermediate feature dimension
+        dropout_rate: Dropout rate for regularization
+        
+    Returns:
+        HeadConfiguration for keypoint detection
+    """
+    custom_params = {
+        "upsample_factor": upsample_factor,
+        "heatmap_sigma": heatmap_sigma,
+        "intermediate_dim": intermediate_dim
+    }
+    
+    return HeadConfiguration(
+        name=name,
+        num_classes=num_keypoints,
+        activation="sigmoid",
+        dropout_rate=dropout_rate,
+        head_type="keypoint_detection",
+        custom_params=custom_params
     )

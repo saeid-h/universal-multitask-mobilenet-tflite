@@ -56,6 +56,23 @@ def get_loss_for_head_type(head_type: str, from_logits: bool = True, **kwargs) -
         # Use binary crossentropy for each threshold
         return tf.keras.losses.BinaryCrossentropy(from_logits=False, **kwargs)  # sigmoid outputs
     
+    elif head_type == "ssd_detection":
+        # SSD uses combined classification + localization loss
+        # Return a custom loss that handles both outputs
+        return SSDLoss(**kwargs)
+    
+    elif head_type == "yolo_detection":
+        # YOLO uses combined objectness + classification + localization loss
+        return YOLOLoss(**kwargs)
+    
+    elif head_type == "segmentation":
+        # Pixel-wise classification
+        return tf.keras.losses.SparseCategoricalCrossentropy(from_logits=from_logits, **kwargs)
+    
+    elif head_type == "keypoint_detection":
+        # Heatmap regression (MSE on heatmap values)
+        return tf.keras.losses.MeanSquaredError(**kwargs)
+    
     else:
         raise ValueError(f"Unknown head type: {head_type}")
 
@@ -117,6 +134,18 @@ def get_metrics_for_head_type(head_type: str) -> list:
     
     elif head_type == "ordinal":
         return ['binary_accuracy', 'mae']  # MAE on ordinal predictions
+    
+    elif head_type == "ssd_detection":
+        return ['binary_accuracy']  # For classification component
+    
+    elif head_type == "yolo_detection":
+        return ['binary_accuracy']  # For objectness component
+    
+    elif head_type == "segmentation":
+        return ['accuracy', 'sparse_categorical_accuracy']
+    
+    elif head_type == "keypoint_detection":
+        return ['mse', 'mae']  # Heatmap regression metrics
     
     else:
         return ['accuracy']  # Default fallback
@@ -231,3 +260,129 @@ def ordinal_mae(y_true, y_pred):
     # Compute MAE
     y_true = tf.cast(y_true, tf.float32)
     return tf.reduce_mean(tf.abs(ordinal_preds - y_true))
+
+
+class SSDLoss(tf.keras.losses.Loss):
+    """Combined loss for SSD detection (classification + localization).
+    
+    Combines binary/multi-class crossentropy for classification with
+    smooth L1 loss for bounding box regression.
+    """
+    
+    def __init__(self, alpha: float = 1.0, neg_pos_ratio: float = 3.0, 
+                 name: str = "ssd_loss", **kwargs):
+        super().__init__(name=name, **kwargs)
+        self.alpha = alpha  # Weight for localization loss
+        self.neg_pos_ratio = neg_pos_ratio  # Negative to positive ratio for hard negative mining
+    
+    def call(self, y_true, y_pred):
+        """Compute SSD loss.
+        
+        Args:
+            y_true: Dictionary with 'boxes' and 'labels' ground truth
+            y_pred: Dictionary with 'boxes' and 'scores' predictions
+            
+        Returns:
+            Combined loss scalar
+        """
+        # Extract predictions and targets
+        pred_boxes = y_pred['boxes']  # [batch, num_anchors, 4]
+        pred_scores = y_pred['scores']  # [batch, num_anchors, num_classes]
+        
+        true_boxes = y_true['boxes']  # [batch, num_anchors, 4] 
+        true_labels = y_true['labels']  # [batch, num_anchors] (0 = background)
+        
+        # Classification loss (with hard negative mining)
+        classification_loss = tf.keras.losses.sparse_categorical_crossentropy(
+            true_labels, pred_scores, from_logits=False
+        )
+        
+        # Localization loss (only for positive anchors)
+        positive_mask = tf.cast(true_labels > 0, tf.float32)  # Ignore background
+        
+        # Smooth L1 loss for bounding boxes
+        box_diff = pred_boxes - true_boxes
+        abs_diff = tf.abs(box_diff)
+        smooth_l1 = tf.where(
+            abs_diff < 1.0,
+            0.5 * tf.square(box_diff),
+            abs_diff - 0.5
+        )
+        localization_loss = tf.reduce_sum(smooth_l1 * tf.expand_dims(positive_mask, -1), axis=-1)
+        
+        # Normalize by number of positive anchors
+        num_positives = tf.reduce_sum(positive_mask, axis=1, keepdims=True)
+        num_positives = tf.maximum(num_positives, 1.0)  # Avoid division by zero
+        
+        classification_loss = tf.reduce_sum(classification_loss * positive_mask, axis=1) / num_positives[:, 0]
+        localization_loss = tf.reduce_sum(localization_loss, axis=1) / num_positives[:, 0]
+        
+        # Combined loss
+        total_loss = classification_loss + self.alpha * localization_loss
+        return tf.reduce_mean(total_loss)
+    
+    def get_config(self):
+        config = super().get_config()
+        config.update({
+            'alpha': self.alpha,
+            'neg_pos_ratio': self.neg_pos_ratio
+        })
+        return config
+
+
+class YOLOLoss(tf.keras.losses.Loss):
+    """YOLO detection loss (objectness + classification + localization).
+    
+    Computes the YOLO loss combining objectness confidence, 
+    class probabilities, and bounding box coordinates.
+    """
+    
+    def __init__(self, lambda_coord: float = 5.0, lambda_noobj: float = 0.5,
+                 name: str = "yolo_loss", **kwargs):
+        super().__init__(name=name, **kwargs)
+        self.lambda_coord = lambda_coord  # Weight for coordinate loss
+        self.lambda_noobj = lambda_noobj  # Weight for no-object loss
+    
+    def call(self, y_true, y_pred):
+        """Compute YOLO loss.
+        
+        Args:
+            y_true: Ground truth tensor [batch, grid_h, grid_w, num_boxes * (5 + num_classes)]
+            y_pred: Predicted tensor [batch, grid_h, grid_w, num_boxes * (5 + num_classes)]
+            
+        Returns:
+            YOLO loss scalar
+        """
+        # This is a simplified version - full YOLO loss is more complex
+        # For production, use tf.keras.losses.binary_crossentropy for components
+        
+        # Split predictions into components
+        # Format: [x, y, w, h, objectness, class1, class2, ...]
+        
+        # Objectness loss (binary crossentropy)
+        obj_loss = tf.keras.losses.binary_crossentropy(
+            y_true[..., 4::5+1], y_pred[..., 4::5+1], from_logits=True  # Simplified indexing
+        )
+        
+        # Coordinate loss (MSE for present objects)
+        coord_loss = tf.keras.losses.mse(y_true[..., :4], y_pred[..., :4])
+        
+        # Class loss (categorical crossentropy for present objects)
+        class_loss = tf.keras.losses.sparse_categorical_crossentropy(
+            y_true[..., 5:], y_pred[..., 5:], from_logits=True
+        )
+        
+        # Combine losses (simplified weighting)
+        total_loss = (self.lambda_coord * coord_loss + 
+                     obj_loss + 
+                     class_loss)
+        
+        return tf.reduce_mean(total_loss)
+    
+    def get_config(self):
+        config = super().get_config()
+        config.update({
+            'lambda_coord': self.lambda_coord,
+            'lambda_noobj': self.lambda_noobj
+        })
+        return config

@@ -250,6 +250,234 @@ def build_embedding_head(head_config: HeadConfiguration, backbone_output: tf.Ten
     )(x)
 
 
+@register_head("ssd_detection")
+def build_ssd_detection_head(head_config: HeadConfiguration, backbone_output: tf.Tensor) -> tf.Tensor:
+    """Build SSD (Single Shot MultiBox Detector) head for object detection.
+    
+    Suitable for face detection, object detection, and general bounding box regression.
+    Predicts both classification scores and bounding box coordinates for multiple
+    anchor boxes per spatial location.
+    
+    Custom parameters:
+        - num_anchors (int): Number of anchor boxes per location (default: 3)
+        - anchor_scales (list): Scale factors for anchors (default: [0.1, 0.2, 0.37])
+        - anchor_ratios (list): Aspect ratios for anchors (default: [0.5, 1.0, 2.0])
+        - box_loss_weight (float): Weight for bbox regression loss (default: 1.0)
+        - conf_threshold (float): Confidence threshold for NMS (default: 0.5)
+    
+    Args:
+        head_config: Head configuration (num_classes includes background class)
+        backbone_output: Backbone feature map tensor
+        
+    Returns:
+        Dictionary with 'boxes' and 'scores' tensors
+        - boxes: [batch, num_anchors_total, 4] (x_center, y_center, width, height)
+        - scores: [batch, num_anchors_total, num_classes] (class probabilities)
+    """
+    # Get custom parameters
+    num_anchors = head_config.custom_params.get("num_anchors", 3)
+    
+    B, H, W, C = backbone_output.shape
+    num_locations = H * W
+    num_anchors_total = num_locations * num_anchors
+    
+    # Shared convolutional layers for feature processing
+    x = layers.Conv2D(256, 3, padding='same', activation='relu', 
+                      name=f"{head_config.name}_conv1")(backbone_output)
+    x = layers.Conv2D(256, 3, padding='same', activation='relu',
+                      name=f"{head_config.name}_conv2")(x)
+    
+    if head_config.dropout_rate > 0:
+        x = layers.Dropout(head_config.dropout_rate, name=f"{head_config.name}_dropout")(x)
+    
+    # Classification head: predicts class probabilities for each anchor
+    cls_conv = layers.Conv2D(
+        num_anchors * head_config.num_classes, 
+        3, padding='same', activation='linear',
+        name=f"{head_config.name}_cls_conv"
+    )(x)
+    
+    # Reshape to [batch, num_anchors_total, num_classes]
+    cls_scores = layers.Reshape(
+        (num_anchors_total, head_config.num_classes),
+        name=f"{head_config.name}_cls_reshape"
+    )(cls_conv)
+    
+    # Apply sigmoid for binary classification (face/no-face) or softmax for multi-class
+    if head_config.num_classes == 1:
+        # Binary detection (face/no-face)
+        cls_scores = layers.Activation('sigmoid', name=f"{head_config.name}_cls_sigmoid")(cls_scores)
+    else:
+        # Multi-class detection
+        cls_scores = layers.Activation('softmax', name=f"{head_config.name}_cls_softmax")(cls_scores)
+    
+    # Box regression head: predicts bbox offsets for each anchor
+    box_conv = layers.Conv2D(
+        num_anchors * 4,  # 4 coordinates per box
+        3, padding='same', activation='linear',
+        name=f"{head_config.name}_box_conv"
+    )(x)
+    
+    # Reshape to [batch, num_anchors_total, 4]
+    box_preds = layers.Reshape(
+        (num_anchors_total, 4),
+        name=f"{head_config.name}_box_reshape"
+    )(box_conv)
+    
+    # Return as dictionary for multi-output
+    return {
+        'scores': cls_scores,
+        'boxes': box_preds
+    }
+
+
+@register_head("yolo_detection") 
+def build_yolo_detection_head(head_config: HeadConfiguration, backbone_output: tf.Tensor) -> tf.Tensor:
+    """Build YOLO-style detection head.
+    
+    Alternative to SSD with different anchor-free or anchor-based approach.
+    Predicts objectness, class probabilities, and bounding boxes.
+    
+    Custom parameters:
+        - grid_size (int): Output grid size (default: inferred from feature map)
+        - num_boxes (int): Number of boxes per grid cell (default: 3)
+        - coord_scale (float): Scaling factor for coordinates (default: 1.0)
+    
+    Args:
+        head_config: Head configuration
+        backbone_output: Backbone feature map tensor
+        
+    Returns:
+        YOLO prediction tensor [batch, grid_h, grid_w, num_boxes * (5 + num_classes)]
+        Where 5 = (x, y, w, h, objectness)
+    """
+    num_boxes = head_config.custom_params.get("num_boxes", 3)
+    
+    # Feature processing
+    x = layers.Conv2D(256, 3, padding='same', activation='relu',
+                      name=f"{head_config.name}_conv1")(backbone_output)
+    x = layers.Conv2D(128, 1, activation='relu',
+                      name=f"{head_config.name}_conv2")(x)
+    
+    if head_config.dropout_rate > 0:
+        x = layers.Dropout(head_config.dropout_rate, name=f"{head_config.name}_dropout")(x)
+    
+    # Output: objectness (1) + bbox (4) + class probs (num_classes)
+    outputs_per_box = 5 + head_config.num_classes
+    total_outputs = num_boxes * outputs_per_box
+    
+    predictions = layers.Conv2D(
+        total_outputs,
+        1,  # 1x1 conv for final predictions
+        activation='linear',
+        name=f"{head_config.name}_output"
+    )(x)
+    
+    return predictions
+
+
+@register_head("segmentation")
+def build_segmentation_head(head_config: HeadConfiguration, backbone_output: tf.Tensor) -> tf.Tensor:
+    """Build semantic segmentation head.
+    
+    Performs pixel-wise classification for semantic segmentation tasks.
+    Uses transposed convolutions to upsample to input resolution.
+    
+    Custom parameters:
+        - upsample_factor (int): Factor to upsample feature maps (default: 8)
+        - intermediate_channels (list): Channels for upsampling layers (default: [256, 128])
+        - use_skip_connections (bool): Use U-Net style skip connections (default: False)
+    
+    Args:
+        head_config: Head configuration (num_classes = number of semantic classes)
+        backbone_output: Backbone feature map tensor
+        
+    Returns:
+        Segmentation logits [batch, height, width, num_classes]
+    """
+    upsample_factor = head_config.custom_params.get("upsample_factor", 8)
+    intermediate_channels = head_config.custom_params.get("intermediate_channels", [256, 128])
+    
+    x = backbone_output
+    
+    # Progressive upsampling with intermediate feature processing
+    for i, channels in enumerate(intermediate_channels):
+        # Reduce channels
+        x = layers.Conv2D(channels, 3, padding='same', activation='relu',
+                         name=f"{head_config.name}_upsample_conv_{i}")(x)
+        
+        if head_config.dropout_rate > 0:
+            x = layers.Dropout(head_config.dropout_rate, 
+                              name=f"{head_config.name}_upsample_dropout_{i}")(x)
+        
+        # Upsample by 2x
+        x = layers.Conv2DTranspose(channels, 3, strides=2, padding='same', activation='relu',
+                                  name=f"{head_config.name}_upsample_{i}")(x)
+    
+    # Final upsampling to match input resolution
+    remaining_factor = upsample_factor // (2 ** len(intermediate_channels))
+    if remaining_factor > 1:
+        x = layers.Conv2DTranspose(64, 3, strides=remaining_factor, padding='same', activation='relu',
+                                  name=f"{head_config.name}_final_upsample")(x)
+    
+    # Final classification layer
+    segmentation_logits = layers.Conv2D(
+        head_config.num_classes,
+        1,  # 1x1 conv for pixel-wise classification
+        activation='linear',
+        name=f"{head_config.name}_output"
+    )(x)
+    
+    return segmentation_logits
+
+
+@register_head("keypoint_detection")
+def build_keypoint_detection_head(head_config: HeadConfiguration, backbone_output: tf.Tensor) -> tf.Tensor:
+    """Build keypoint detection head for pose estimation.
+    
+    Predicts heatmaps for keypoint locations (e.g., facial landmarks, body joints).
+    Each keypoint gets its own heatmap channel.
+    
+    Custom parameters:
+        - heatmap_sigma (float): Gaussian sigma for ground truth heatmaps (default: 1.0)
+        - upsample_factor (int): Upsampling factor for heatmaps (default: 4)
+        - intermediate_dim (int): Intermediate feature dimension (default: 256)
+    
+    Args:
+        head_config: Head configuration (num_classes = number of keypoints)
+        backbone_output: Backbone feature map tensor
+        
+    Returns:
+        Keypoint heatmaps [batch, height, width, num_keypoints]
+    """
+    upsample_factor = head_config.custom_params.get("upsample_factor", 4)
+    intermediate_dim = head_config.custom_params.get("intermediate_dim", 256)
+    
+    # Feature processing
+    x = layers.Conv2D(intermediate_dim, 3, padding='same', activation='relu',
+                      name=f"{head_config.name}_conv1")(backbone_output)
+    x = layers.Conv2D(intermediate_dim, 3, padding='same', activation='relu',
+                      name=f"{head_config.name}_conv2")(x)
+    
+    if head_config.dropout_rate > 0:
+        x = layers.Dropout(head_config.dropout_rate, name=f"{head_config.name}_dropout")(x)
+    
+    # Upsample to higher resolution for precise keypoint localization
+    if upsample_factor > 1:
+        x = layers.Conv2DTranspose(128, 3, strides=upsample_factor, padding='same', activation='relu',
+                                  name=f"{head_config.name}_upsample")(x)
+    
+    # Generate heatmaps for each keypoint
+    heatmaps = layers.Conv2D(
+        head_config.num_classes,  # One heatmap per keypoint
+        1,  # 1x1 conv for final prediction
+        activation='sigmoid',  # Heatmap values in [0,1]
+        name=f"{head_config.name}_output"
+    )(x)
+    
+    return heatmaps
+
+
 @register_head("ordinal")
 def build_ordinal_regression(head_config: HeadConfiguration, backbone_output: tf.Tensor) -> tf.Tensor:
     """Build ordinal regression head using CORAL (Consistent Rank Logits).
