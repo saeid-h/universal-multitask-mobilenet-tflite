@@ -206,6 +206,41 @@ Save backbone and head weights to separate files. Requires `--separable-weights`
 
 **Example**: `--separable-weights --save-separate-weights`
 
+### `--export-separate-tflite`
+
+Export backbone and heads as separate TFLite files with independent precision formats.
+
+**Requirements**: Must be used with `--separable-weights`
+
+**Purpose**: Enables mixed-precision deployment where backbone and heads can use different formats (int8, fp16, fp32)
+
+**Output files**:
+- `{output_name}_separate_tflite/{output_name}_backbone_{backbone_format}.tflite`
+- `{output_name}_separate_tflite/{output_name}_{head_name}_{head_format}.tflite` (one per head)
+
+### `--backbone-format {int8,fp16,fp32}`
+
+Precision format for backbone TFLite export when using `--export-separate-tflite`.
+
+**Default**: `int8`
+
+**Options**:
+- `int8`: Full quantization with calibration (smallest size, NPU compatible)
+- `fp16`: Half precision floating point (balanced size/accuracy)
+- `fp32`: Full precision (largest size, best accuracy)
+
+### `--head-format {int8,fp16,fp32}`
+
+Precision format for head TFLite exports when using `--export-separate-tflite`.
+
+**Default**: `fp16`
+
+**Use cases**:
+- `fp16`/`fp32`: Better accuracy by avoiding quantization of final classification layers
+- `int8`: Smallest size for resource-constrained deployment
+
+**Example**: `--export-separate-tflite --backbone-format int8 --head-format fp16`
+
 ## Output Files
 
 All output files are saved in the specified `--output-dir` directory.
