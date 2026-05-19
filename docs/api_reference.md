@@ -14,16 +14,21 @@ Either `--heads` (for new models) or `--keras-model-path` (for trained models) m
 
 Comma-separated list of class counts per head. Required when creating a new model.
 
-**Format**: `"num1,num2,num3,..."`
+**Format**: `"num1,num2,num3,..."` or `"num1@stride1,num2@stride2,..."`
 
-**Example**: `--heads "5,2,3"` creates three heads with 5, 2, and 3 classes respectively.
+Each entry is either a bare class count (head uses the default tap = final backbone feature map) or a class count with an `@STRIDE` suffix that routes that head to the backbone feature map at the given stride.
+
+**Examples**:
+- `--heads "5,2,3"` — three heads, all reading the final feature map (stride 32).
+- `--heads "5@32,2@16,3@8"` — three heads tapping different backbone scales. See [Architecture → Feature taps](architecture.md#feature-taps-single-tap) for the per-backbone stride table.
 
 **Requirements**:
 - At least one head must be specified
 - Each head must have at least 1 class
 - Values must be positive integers
+- `@STRIDE` must be a stride exposed by the chosen backbone (currently 4, 8, 16, or 32 for all four backbones); an unsupported stride raises a clear error.
 
-**Note**: The CLI creates standard classification heads. For other head types (multilabel, regression, embedding, ordinal), use the Python API. See [Head Types Reference](head_types_reference.md) for details.
+**Note**: The CLI creates standard classification heads. For other head types (multilabel, regression, embedding, ordinal, segmentation, etc.), use the Python API. See [Head Types Reference](head_types_reference.md) for details.
 - Ignored when `--keras-model-path` is provided
 
 ##### `--keras-model-path`
@@ -213,6 +218,8 @@ Add a unified concatenated output for multi-head models.
 - Unified output: `unified_heads` (10 classes total, concatenated in order)
 
 **Note**: The head order in unified output matches the order specified in `--heads` argument. This order is documented in the model report.
+
+**Incompatibility with feature taps**: `--unified-output` cannot be combined with heads that use a `@STRIDE < 32` in `--heads`. The unified output concatenates 1D head outputs; spatial heads (which produce 4D feature maps) break that contract. Drop `--unified-output` or move the spatial heads back to the default tap.
 
 #### `--separable-weights`
 

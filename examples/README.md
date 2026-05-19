@@ -87,6 +87,18 @@ Demonstrates `--backbone v4` (MobileNetV4-Conv-S, custom UIB-based).
 - **Backbone**: project's custom V4 (no Keras-applications V4 exists)
 - **Heads**: 3 heads, no pretrained weights.
 
+### 16_feature_taps.sh
+Demonstrates per-head feature taps via the `--heads "N@stride"` CLI syntax.
+- **Backbone**: V3, alpha 0.25
+- **Heads**: `5@32,2@16,3@8` — three heads tapping different backbone scales.
+- **Use case**: Mixing classification (final feature map) with spatial-task heads (earlier, higher-resolution layers).
+
+### 17_dynamic_head_addition.sh
+Demonstrates adding a head to a trained model with the backbone frozen.
+- Builds a 3-head model on V3 (all at stride 32).
+- Calls `add_head_dynamically(tap_stride=16, freeze_backbone=True)` to attach a 4th head reading higher-resolution features.
+- **Use case**: Shipping a head increment onto an already-trained multi-head model without retraining existing heads.
+
 ### _verify_tflite.py
 Internal helper used by the backbone-specific examples. Loads a `.tflite` file and asserts the output-tensor count matches `--expected-heads` and the input dtype is `uint8`. Exits non-zero on mismatch.
 

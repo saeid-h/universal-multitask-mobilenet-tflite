@@ -34,6 +34,31 @@ All heads share the same backbone features but have separate final layers. This 
 
 **Note**: Models default to linear activation (no softmax) for Vela compiler compatibility. Apply softmax in post-processing when interpreting outputs.
 
+## Feature taps (single-tap)
+
+By default, every head reads the *final* backbone feature map (typically at 1/32 of input resolution). For spatial heads — segmentation, keypoint heatmaps, dense detection — this is wasteful: the head spends compute upsampling features the backbone has already discarded. Each head can instead declare a `tap_stride` that points it at an earlier, higher-resolution layer.
+
+**Naming**: `tap_stride` is the spatial stride relative to input. For a 96×96 input, `tap_stride=8` gives a 12×12 feature map; `tap_stride=16` gives 6×6; `tap_stride=32` (the default) gives 3×3.
+
+**Per-backbone strides exposed**: All four MobileNet backbones expose stride taps at **4, 8, 16, 32**. The architecture-specific class reports the actual layers via `_features_by_stride()`; you can introspect with `arch._features_by_stride(...)` if needed.
+
+**CLI syntax**: append `@STRIDE` to any entry in `--heads`. Without `@`, the head uses the default (final feature map):
+
+```bash
+python src/create_quantized_mobilenet.py \
+    --backbone v3 \
+    --heads "5@32,2@16,3@8" \
+    --output-dir ./out
+```
+
+**What gets shared**: still everything. The backbone is computed once; heads at different strides just pluck different layers out of that single forward pass. No FPN-style fusion network, no extra learnable parameters between backbone and heads.
+
+**Incompatibility**: `--unified-output` is not compatible with heads at `tap_stride < 32` (the unified output concatenates 1D head outputs; spatial heads break that contract). The CLI rejects this combination with a clear error.
+
+**Adding a head later**: `MultiHeadMobileNetArchitecture.add_head_dynamically(tap_stride=...)` attaches a new head to an existing model — typically with `freeze_backbone=True`, so retraining only touches the new head. See `examples/17_dynamic_head_addition.sh` and the [Training Guide](training_guide.md#adding-a-head-later).
+
+**Why not FPN?** FPN (feature pyramid networks) would add a learnable fusion layer (lateral 1×1 convs + top-down upsample-and-add) on top of the multi-tap idea, producing richer features at each level. Single-tap is the minimum that handles the "different heads, different scales" use case without introducing shared learnable state between heads — which keeps the freeze-backbone-and-add-a-head workflow clean. FPN can be added later as an opt-in mode without breaking the single-tap API.
+
 ## Model Size
 
 Model size depends on:
