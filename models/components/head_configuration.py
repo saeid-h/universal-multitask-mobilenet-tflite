@@ -34,34 +34,49 @@ class HeadConfiguration:
     loss_weight: float = 1.0
     head_type: str = 'standard'
     custom_params: Dict[str, Any] = field(default_factory=dict)
-    
+    # Backbone tap point for this head. None means "use the final backbone
+    # feature map" (current behavior; equivalent to stride 32 for all four
+    # MobileNet backbones). When set to an int, the head receives the
+    # backbone feature map at that stride (relative to input resolution),
+    # e.g. 8 means the layer whose spatial size is input/8. The chosen
+    # backbone validates the stride is one it can expose.
+    tap_stride: Optional[int] = None
+
     def validate(self) -> None:
         """Validate head configuration parameters.
-        
+
         Raises:
             ValueError: If any parameter is invalid
         """
         if not self.name or not isinstance(self.name, str):
             raise ValueError(f"name must be a non-empty string, got {self.name}")
-        
+
         if self.num_classes < 1:
             raise ValueError(f"num_classes must be positive, got {self.num_classes}")
-        
+
         valid_activations = {'softmax', 'sigmoid', 'linear', 'relu', 'tanh'}
         if self.activation not in valid_activations:
             raise ValueError(f"activation must be one of {valid_activations}, got {self.activation}")
-        
+
         if not 0.0 <= self.dropout_rate <= 1.0:
             raise ValueError(f"dropout_rate must be in [0, 1], got {self.dropout_rate}")
-        
+
         if self.loss_weight < 0.0:
             raise ValueError(f"loss_weight must be non-negative, got {self.loss_weight}")
-        
-        valid_head_types = {'standard', 'custom', 'multilabel', 'regression', 'embedding', 'ordinal', 
+
+        valid_head_types = {'standard', 'custom', 'multilabel', 'regression', 'embedding', 'ordinal',
                            'ssd_detection', 'yolo_detection', 'segmentation', 'keypoint_detection',
                            'text_detection', 'text_recognition', 'scene_text'}
         if self.head_type not in valid_head_types:
             raise ValueError(f"head_type must be one of {valid_head_types}, got {self.head_type}")
+
+        if self.tap_stride is not None:
+            if not isinstance(self.tap_stride, int) or self.tap_stride < 1:
+                raise ValueError(
+                    f"tap_stride must be a positive integer or None, got {self.tap_stride!r}"
+                )
+            # The per-backbone architecture additionally validates that the
+            # stride matches one of its exposed feature maps.
     
     def __post_init__(self):
         """Validate configuration after initialization."""
@@ -80,7 +95,8 @@ class HeadConfiguration:
             'dropout_rate': self.dropout_rate,
             'loss_weight': self.loss_weight,
             'head_type': self.head_type,
-            'custom_params': self.custom_params.copy()
+            'custom_params': self.custom_params.copy(),
+            'tap_stride': self.tap_stride,
         }
     
     @classmethod
@@ -229,7 +245,8 @@ class MultiHeadConfiguration:
 
 def create_head_config_from_list(head_config_list: List[int], 
                                 head_names: Optional[List[str]] = None,
-                                head_type: str = "standard") -> List[HeadConfiguration]:
+                                head_type: str = "standard",
+                                 tap_stride: Optional[int] = None) -> List[HeadConfiguration]:
     """Create head configurations from a list of class counts.
     
     This utility function creates HeadConfiguration objects from a simple list
@@ -262,7 +279,8 @@ def create_head_config_from_list(head_config_list: List[int],
         head_config = HeadConfiguration(
             name=name,
             num_classes=num_classes,
-            head_type=head_type
+            head_type=head_type,
+            tap_stride=tap_stride
         )
         heads.append(head_config)
     
@@ -270,7 +288,8 @@ def create_head_config_from_list(head_config_list: List[int],
 
 
 def create_classification_head(name: str, num_classes: int, activation: str = "linear", 
-                             dropout_rate: float = 0.2) -> HeadConfiguration:
+                             dropout_rate: float = 0.2,
+                                 tap_stride: Optional[int] = None) -> HeadConfiguration:
     """Create a standard classification head configuration.
     
     Args:
@@ -287,11 +306,13 @@ def create_classification_head(name: str, num_classes: int, activation: str = "l
         num_classes=num_classes,
         activation=activation,
         dropout_rate=dropout_rate,
-        head_type="standard"
+        head_type="standard",
+        tap_stride=tap_stride
     )
 
 
-def create_multilabel_head(name: str, num_labels: int, dropout_rate: float = 0.2) -> HeadConfiguration:
+def create_multilabel_head(name: str, num_labels: int, dropout_rate: float = 0.2,
+                                 tap_stride: Optional[int] = None) -> HeadConfiguration:
     """Create a multi-label classification head configuration.
     
     Args:
@@ -307,7 +328,8 @@ def create_multilabel_head(name: str, num_labels: int, dropout_rate: float = 0.2
         num_classes=num_labels,
         activation="sigmoid",  # Will be overridden by builder
         dropout_rate=dropout_rate,
-        head_type="multilabel"
+        head_type="multilabel",
+        tap_stride=tap_stride
     )
 
 
@@ -315,7 +337,8 @@ def create_regression_head(name: str, n_outputs: int = 1,
                          output_activation: Optional[str] = None,
                          output_scale: float = 1.0, 
                          output_bias: float = 0.0,
-                         dropout_rate: float = 0.2) -> HeadConfiguration:
+                         dropout_rate: float = 0.2,
+                                 tap_stride: Optional[int] = None) -> HeadConfiguration:
     """Create a regression head configuration.
     
     Args:
@@ -343,14 +366,16 @@ def create_regression_head(name: str, n_outputs: int = 1,
         activation="linear",
         dropout_rate=dropout_rate,
         head_type="regression",
-        custom_params=custom_params
+        custom_params=custom_params,
+        tap_stride=tap_stride
     )
 
 
 def create_embedding_head(name: str, embed_dim: int = 128,
                         projection_layers: Optional[List[int]] = None,
                         use_bn: bool = False,
-                        dropout_rate: float = 0.2) -> HeadConfiguration:
+                        dropout_rate: float = 0.2,
+                                 tap_stride: Optional[int] = None) -> HeadConfiguration:
     """Create an embedding head configuration.
     
     Args:
@@ -376,13 +401,15 @@ def create_embedding_head(name: str, embed_dim: int = 128,
         activation="linear",
         dropout_rate=dropout_rate,
         head_type="embedding",
-        custom_params=custom_params
+        custom_params=custom_params,
+        tap_stride=tap_stride
     )
 
 
 def create_ordinal_head(name: str, num_classes: int,
                       threshold_init: str = "ascending",
-                      dropout_rate: float = 0.2) -> HeadConfiguration:
+                      dropout_rate: float = 0.2,
+                                 tap_stride: Optional[int] = None) -> HeadConfiguration:
     """Create an ordinal regression head configuration.
     
     Args:
@@ -403,7 +430,8 @@ def create_ordinal_head(name: str, num_classes: int,
         activation="sigmoid",
         dropout_rate=dropout_rate,
         head_type="ordinal",
-        custom_params={"threshold_init": threshold_init}
+        custom_params={"threshold_init": threshold_init},
+        tap_stride=tap_stride
     )
 
 
@@ -411,7 +439,8 @@ def create_ssd_detection_head(name: str, num_classes: int = 1,
                             num_anchors: int = 3,
                             anchor_scales: Optional[List[float]] = None,
                             anchor_ratios: Optional[List[float]] = None,
-                            dropout_rate: float = 0.1) -> HeadConfiguration:
+                            dropout_rate: float = 0.1,
+                                 tap_stride: Optional[int] = None) -> HeadConfiguration:
     """Create an SSD detection head configuration.
     
     Args:
@@ -442,14 +471,16 @@ def create_ssd_detection_head(name: str, num_classes: int = 1,
         activation="linear",
         dropout_rate=dropout_rate,
         head_type="ssd_detection",
-        custom_params=custom_params
+        custom_params=custom_params,
+        tap_stride=tap_stride
     )
 
 
 def create_yolo_detection_head(name: str, num_classes: int,
                              num_boxes: int = 3,
                              coord_scale: float = 1.0,
-                             dropout_rate: float = 0.1) -> HeadConfiguration:
+                             dropout_rate: float = 0.1,
+                                 tap_stride: Optional[int] = None) -> HeadConfiguration:
     """Create a YOLO detection head configuration.
     
     Args:
@@ -473,14 +504,16 @@ def create_yolo_detection_head(name: str, num_classes: int,
         activation="linear",
         dropout_rate=dropout_rate,
         head_type="yolo_detection",
-        custom_params=custom_params
+        custom_params=custom_params,
+        tap_stride=tap_stride
     )
 
 
 def create_segmentation_head(name: str, num_classes: int,
                            upsample_factor: int = 8,
                            intermediate_channels: Optional[List[int]] = None,
-                           dropout_rate: float = 0.2) -> HeadConfiguration:
+                           dropout_rate: float = 0.2,
+                                 tap_stride: Optional[int] = None) -> HeadConfiguration:
     """Create a semantic segmentation head configuration.
     
     Args:
@@ -507,7 +540,8 @@ def create_segmentation_head(name: str, num_classes: int,
         activation="linear",
         dropout_rate=dropout_rate,
         head_type="segmentation",
-        custom_params=custom_params
+        custom_params=custom_params,
+        tap_stride=tap_stride
     )
 
 
@@ -515,7 +549,8 @@ def create_keypoint_detection_head(name: str, num_keypoints: int,
                                  upsample_factor: int = 4,
                                  heatmap_sigma: float = 1.0,
                                  intermediate_dim: int = 256,
-                                 dropout_rate: float = 0.1) -> HeadConfiguration:
+                                 dropout_rate: float = 0.1,
+                                 tap_stride: Optional[int] = None) -> HeadConfiguration:
     """Create a keypoint detection head configuration.
     
     Args:
@@ -541,7 +576,8 @@ def create_keypoint_detection_head(name: str, num_keypoints: int,
         activation="sigmoid",
         dropout_rate=dropout_rate,
         head_type="keypoint_detection",
-        custom_params=custom_params
+        custom_params=custom_params,
+        tap_stride=tap_stride
     )
 
 
@@ -550,7 +586,8 @@ def create_text_detection_head(name: str,
                              min_text_size: int = 8,
                              link_threshold: float = 0.4,
                              text_threshold: float = 0.7,
-                             dropout_rate: float = 0.1) -> HeadConfiguration:
+                             dropout_rate: float = 0.1,
+                                 tap_stride: Optional[int] = None) -> HeadConfiguration:
     """Create a text detection head configuration.
     
     Args:
@@ -577,7 +614,8 @@ def create_text_detection_head(name: str,
         activation="sigmoid",
         dropout_rate=dropout_rate,
         head_type="text_detection",
-        custom_params=custom_params
+        custom_params=custom_params,
+        tap_stride=tap_stride
     )
 
 
@@ -586,7 +624,8 @@ def create_text_recognition_head(name: str, vocab_size: int,
                                use_attention: bool = False,
                                rnn_units: int = 256,
                                num_rnn_layers: int = 2,
-                               dropout_rate: float = 0.2) -> HeadConfiguration:
+                               dropout_rate: float = 0.2,
+                                 tap_stride: Optional[int] = None) -> HeadConfiguration:
     """Create a text recognition head configuration.
     
     Args:
@@ -614,7 +653,8 @@ def create_text_recognition_head(name: str, vocab_size: int,
         activation="linear",  # CTC compatible
         dropout_rate=dropout_rate,
         head_type="text_recognition",
-        custom_params=custom_params
+        custom_params=custom_params,
+        tap_stride=tap_stride
     )
 
 
@@ -622,7 +662,8 @@ def create_scene_text_head(name: str, char_vocab_size: int,
                          max_detections: int = 100,
                          max_chars_per_text: int = 25,
                          detection_threshold: float = 0.5,
-                         dropout_rate: float = 0.1) -> HeadConfiguration:
+                         dropout_rate: float = 0.1,
+                                 tap_stride: Optional[int] = None) -> HeadConfiguration:
     """Create an end-to-end scene text reading head configuration.
     
     Args:
@@ -649,5 +690,6 @@ def create_scene_text_head(name: str, char_vocab_size: int,
         activation="linear",
         dropout_rate=dropout_rate,
         head_type="scene_text",
-        custom_params=custom_params
+        custom_params=custom_params,
+        tap_stride=tap_stride
     )

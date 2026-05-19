@@ -301,48 +301,109 @@ class MultiHeadMobileNetArchitecture(MobileNetArchitecture):
         from ..components.head_builders import build_head_for_type
         return build_head_for_type(head_config.head_type, head_config, backbone_output)
     
+    def _features_by_stride(
+        self,
+        backbone: tf.keras.Model,
+        input_tensor: tf.Tensor,
+        backbone_output: tf.Tensor,
+    ) -> Dict[int, tf.Tensor]:
+        """Return a {stride: feature_tensor} dict for this backbone.
+
+        Subclasses override this to expose intermediate feature maps at
+        strides 4, 8, 16, 32 (relative to input resolution). The default
+        implementation returns an empty dict — meaning heads with
+        ``tap_stride=None`` continue to receive ``backbone_output``
+        (current behavior), and any head with ``tap_stride`` set will
+        fail validation.
+
+        Args:
+            backbone: The shared backbone Keras model.
+            input_tensor: The model's input tensor (Keras Input layer).
+            backbone_output: The full-depth output of ``backbone(input_tensor)``.
+
+        Returns:
+            Dict mapping stride (int, e.g. 4/8/16/32) to the corresponding
+            feature tensor. Default: ``{}``.
+        """
+        return {}
+
     def build_model(self) -> tf.keras.Model:
         """Build and return the complete multi-head TensorFlow model.
-        
+
         This method creates the complete multi-head model by:
         1. Building the shared backbone
-        2. Creating multiple classification heads
-        3. Connecting heads to backbone outputs
+        2. Computing per-stride feature maps (via _features_by_stride)
+        3. Routing each head to the feature map at its tap_stride
+           (defaulting to the final backbone output when tap_stride is None)
         4. Optionally creating a unified concatenated output
         5. Creating a model with multiple outputs
-        
+
         Returns:
             Compiled TensorFlow Keras model with multiple outputs
-            
+
         Raises:
-            ValueError: If model cannot be built with current configuration
+            ValueError: If model cannot be built with current configuration,
+                or if a head requests a tap_stride that the backbone does
+                not expose.
         """
         # Build the shared backbone
         backbone = self.build_backbone()
-        
+
         # Create input layer
         input_layer = layers.Input(shape=self.config.input_shape, name='input')
-        
+
         # Get backbone output
         backbone_output = backbone(input_layer)
-        
+
+        # Per-stride feature dict (may be empty for the default
+        # implementation; subclasses override to expose stride taps).
+        features = self._features_by_stride(backbone, input_layer, backbone_output)
+
+        # Determine if any head requests a non-default tap; only fault
+        # --unified-output here because spatial-tap heads break the
+        # 1D concatenation contract.
+        spatial_taps = [
+            h for h in self.head_configs
+            if h.tap_stride is not None and h.tap_stride < 32
+        ]
+        if self._unified_output and spatial_taps:
+            spatial_names = [h.name for h in spatial_taps]
+            raise ValueError(
+                "unified_output=True is incompatible with heads that use a "
+                f"non-default tap_stride < 32. Heads with spatial taps: "
+                f"{spatial_names}. Either drop --unified-output or set those "
+                "heads' tap_stride to None (final feature map)."
+            )
+
         # Create multiple heads
         outputs = {}
         head_outputs_list = []
         for head_config in self.head_configs:
-            head_output = self.build_head(head_config, backbone_output)
+            if head_config.tap_stride is None:
+                head_input = backbone_output
+            else:
+                if head_config.tap_stride not in features:
+                    available = sorted(features.keys()) if features else "none (backbone does not expose stride taps)"
+                    raise ValueError(
+                        f"Head '{head_config.name}' requested tap_stride="
+                        f"{head_config.tap_stride}, but this backbone exposes "
+                        f"only: {available}."
+                    )
+                head_input = features[head_config.tap_stride]
+
+            head_output = self.build_head(head_config, head_input)
             outputs[head_config.name] = head_output
             head_outputs_list.append(head_output)
-        
+
         # Add unified output if requested and model has multiple heads
         if self._unified_output:
             # Concatenate all head outputs in order
             unified_heads = layers.Concatenate(name='unified_heads')(head_outputs_list)
             outputs['unified_heads'] = unified_heads
-        
+
         # Create the complete model
         model = Model(inputs=input_layer, outputs=outputs, name=self.name)
-        
+
         return model
     
     def validate_config(self) -> None:
