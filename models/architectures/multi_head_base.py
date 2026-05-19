@@ -632,64 +632,107 @@ class MultiHeadMobileNetArchitecture(MobileNetArchitecture):
         head_name: str,
         activation: str = 'linear',
         dropout_rate: float = 0.2,
-        freeze_backbone: bool = False
+        freeze_backbone: bool = False,
+        tap_stride: Optional[int] = None,
+        head_type: str = 'standard',
     ) -> tf.keras.Model:
         """Add a new head to the existing model dynamically.
-        
-        This method creates a new head and adds it to the model without
-        retraining the backbone. Optionally freeze the backbone to train
-        only the new head.
-        
+
+        Creates a new head and attaches it without retraining the
+        backbone. The new head may tap a different backbone stride
+        than existing heads — useful for adding a dense-prediction head
+        (segmentation/keypoint) to a model that previously only had
+        classification heads at the final feature map.
+
         Args:
             num_classes: Number of classes for the new head
             head_name: Name for the new head
             activation: Activation function ('linear' for Vela compatibility)
             dropout_rate: Dropout rate for the head
-            freeze_backbone: If True, freeze backbone weights
-            
+            freeze_backbone: If True, freeze backbone weights so only the
+                new head trains.
+            tap_stride: If set, route the new head to the backbone feature
+                map at this stride (must be a stride this backbone exposes
+                via _features_by_stride). None = use the final feature map
+                (existing behavior).
+            head_type: Head type string from the head-builder registry
+                (default 'standard' = GAP + Dropout + Dense classification).
+
         Returns:
             Updated model with the new head
-            
+
         Raises:
-            ValueError: If separable_weights is not enabled or head name exists
+            ValueError: If separable_weights is not enabled, head name
+                exists, or the requested tap_stride is not exposed.
         """
         self._check_separable('add_head_dynamically')
-        
+
         if head_name in self.head_names:
             raise ValueError(f"Head '{head_name}' already exists. Choose a different name.")
-        
+
         # Create new head configuration
         new_head_config = HeadConfiguration(
             name=head_name,
             num_classes=num_classes,
             activation=activation,
-            dropout_rate=dropout_rate
+            dropout_rate=dropout_rate,
+            head_type=head_type,
+            tap_stride=tap_stride,
         )
-        
+
         # Get current model
         model = self.get_model()
-        
+
         # Get backbone
         backbone = self.backbone
-        
+
         # Freeze backbone if requested
         if freeze_backbone:
             backbone.trainable = False
             print(f"Backbone frozen for training new head '{head_name}'")
-        
+
         # Get backbone output from the current model
         backbone_output = backbone(model.input)
-        
+
+        # Resolve which feature tensor the new head consumes. For the
+        # default tap (None) we use the backbone output; otherwise we
+        # look up the requested stride.
+        if tap_stride is None:
+            head_input = backbone_output
+        else:
+            features = self._features_by_stride(backbone, model.input, backbone_output)
+            if tap_stride not in features:
+                available = sorted(features.keys()) if features else "none (backbone does not expose stride taps)"
+                raise ValueError(
+                    f"Head '{head_name}' requested tap_stride={tap_stride}, "
+                    f"but this backbone exposes only: {available}."
+                )
+            head_input = features[tap_stride]
+
         # Build new head
-        new_head_output = self.build_head(new_head_config, backbone_output)
+        new_head_output = self.build_head(new_head_config, head_input)
         
-        # Collect all outputs (existing + new)
-        new_outputs = {}
-        for output_name in model.output_names:
-            if output_name != 'unified_heads':  # Skip unified output, will recreate if needed
-                new_outputs[output_name] = model.output[output_name]
+        # Collect all outputs (existing + new). Keras names model.output
+        # by the final layer's name (e.g. "head_1_output"), but build_model
+        # passes a dict keyed by head_config.name, so model.output is a
+        # dict keyed by head names. Iterate that dict directly.
+        existing_outputs = model.output
+        if isinstance(existing_outputs, dict):
+            new_outputs = {
+                name: tensor
+                for name, tensor in existing_outputs.items()
+                if name != 'unified_heads'
+            }
+        else:
+            # Fallback: pair output_names with output tensors positionally.
+            tensors = existing_outputs if isinstance(existing_outputs, (list, tuple)) else [existing_outputs]
+            new_outputs = {
+                name: tensor
+                for name, tensor in zip(model.output_names, tensors)
+                if name != 'unified_heads'
+            }
         new_outputs[head_name] = new_head_output
-        
+
         # Add unified output if it was enabled
         if self._unified_output:
             head_outputs_list = [new_outputs[name] for name in self.head_names + [head_name]]
