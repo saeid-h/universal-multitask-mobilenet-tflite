@@ -368,6 +368,8 @@ arch = MultiHeadMobileNetV3QATArchitecture(config)
 model = arch.get_model()
 ```
 
+All head types in this reference work identically across the four MobileNet backbones — swap `MultiHeadMobileNetV3QATArchitecture` for `MultiHeadMobileNetV{1,2,4}QATArchitecture` to use V1, V2, or V4 instead.
+
 ### Complete Face Analysis Example
 
 ```python

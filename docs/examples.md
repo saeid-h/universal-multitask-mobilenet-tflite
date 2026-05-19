@@ -1,13 +1,13 @@
 # Examples
 
-Real-world examples of creating quantized MobileNet V3 models for different use cases.
+Real-world examples of creating quantized MobileNet models for different use cases. All examples default to the V3 backbone; swap in `--backbone v1`, `v2`, or `v4` on any command below to use a different MobileNet version (output filenames will be auto-prefixed `mnv1_*`/`mnv2_*`/`mnv4_*`).
 
 ## Example 1: Person Detection (Single Head)
 
 Simple binary classification - detect if a person is present in an image.
 
 ```bash
-python src/create_quantized_mobilenet_v3.py \
+python src/create_quantized_mobilenet.py \
     --alpha 0.25 \
     --input-shape "224x224x3" \
     --heads "2" \
@@ -21,7 +21,7 @@ This creates a small, fast model suitable for edge devices. The output has 2 cla
 Multi-task learning: detect person and classify gender simultaneously.
 
 ```bash
-python src/create_quantized_mobilenet_v3.py \
+python src/create_quantized_mobilenet.py \
     --alpha 0.25 \
     --input-shape "224x224x3" \
     --heads "2,2" \
@@ -40,7 +40,7 @@ Both predictions share the same backbone features, making this more efficient th
 Three-head model for comprehensive scene understanding.
 
 ```bash
-python src/create_quantized_mobilenet_v3.py \
+python src/create_quantized_mobilenet.py \
     --alpha 0.5 \
     --input-shape "224x224x3" \
     --heads "10,2,5" \
@@ -60,7 +60,7 @@ Use alpha 0.5 for better accuracy when handling multiple tasks.
 For applications using grayscale input (like some security cameras or medical imaging).
 
 ```bash
-python src/create_quantized_mobilenet_v3.py \
+python src/create_quantized_mobilenet.py \
     --alpha 0.25 \
     --input-shape "96x96x1" \
     --heads "2" \
@@ -74,7 +74,7 @@ Smaller input size (96x96) with grayscale reduces model size further. Good for c
 When you need better accuracy and can use a larger model.
 
 ```bash
-python src/create_quantized_mobilenet_v3.py \
+python src/create_quantized_mobilenet.py \
     --alpha 0.75 \
     --input-shape "224x224x3" \
     --heads "100,20" \
@@ -95,7 +95,7 @@ Only works with alpha 0.75 or 1.0, and requires RGB input.
 For tasks needing more detail, use larger input resolution.
 
 ```bash
-python src/create_quantized_mobilenet_v3.py \
+python src/create_quantized_mobilenet.py \
     --alpha 0.5 \
     --input-shape "320x320x3" \
     --heads "50,10" \
@@ -112,7 +112,7 @@ Larger inputs improve detail recognition but increase:
 If quantization quality is critical, use more calibration samples.
 
 ```bash
-python src/create_quantized_mobilenet_v3.py \
+python src/create_quantized_mobilenet.py \
     --alpha 0.25 \
     --heads "5,2,3" \
     --calibration-samples 300 \
@@ -131,7 +131,7 @@ Trade-off: Takes longer to generate the model.
 Skip saving the Keras model to save disk space.
 
 ```bash
-python src/create_quantized_mobilenet_v3.py \
+python src/create_quantized_mobilenet.py \
     --heads "2" \
     --no-save-keras \
     --output-dir ./models/deployment_only
@@ -144,7 +144,7 @@ Useful when you only need the TFLite file for deployment and don't need the Kera
 For NPUs or inference engines that don't support multiple output tensors, use the unified output option:
 
 ```bash
-python src/create_quantized_mobilenet_v3.py \
+python src/create_quantized_mobilenet.py \
     --alpha 0.25 \
     --input-shape "224x224x3" \
     --heads "5,2,5,3,2" \
@@ -167,7 +167,7 @@ This creates a model with:
 Specify your own output filename prefix.
 
 ```bash
-python src/create_quantized_mobilenet_v3.py \
+python src/create_quantized_mobilenet.py \
     --alpha 0.25 \
     --heads "10,5" \
     --output-name "my_custom_model" \
@@ -182,15 +182,15 @@ Generate several variants to compare:
 
 ```bash
 # Small model
-python src/create_quantized_mobilenet_v3.py \
+python src/create_quantized_mobilenet.py \
     --alpha 0.25 --heads "2" --output-dir ./models/variants/small
 
 # Medium model
-python src/create_quantized_mobilenet_v3.py \
+python src/create_quantized_mobilenet.py \
     --alpha 0.5 --heads "2" --output-dir ./models/variants/medium
 
 # Large model
-python src/create_quantized_mobilenet_v3.py \
+python src/create_quantized_mobilenet.py \
     --alpha 1.0 --heads "2" --output-dir ./models/variants/large
 ```
 
@@ -201,7 +201,7 @@ Compare model sizes, inference speed, and accuracy to choose the best fit for yo
 If you've already trained a model using the training guide, you can quantize it:
 
 ```bash
-python src/create_quantized_mobilenet_v3.py \
+python src/create_quantized_mobilenet.py \
     --keras-model-path ./trained_models/best_model.keras \
     --output-dir ./deployment_models \
     --calibration-samples 200

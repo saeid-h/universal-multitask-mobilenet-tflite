@@ -21,6 +21,19 @@ from models.components.head_configuration import HeadConfiguration, create_head_
 from models.architectures.mobilenet_v3_qat_multi import MultiHeadMobileNetV3QATArchitecture
 ```
 
+For other MobileNet backbones, swap the import:
+
+```python
+# MobileNet V1 multi-head
+from models.architectures.mobilenet_v1_qat_multi import MultiHeadMobileNetV1QATArchitecture
+# MobileNet V2 multi-head
+from models.architectures.mobilenet_v2_qat_multi import MultiHeadMobileNetV2QATArchitecture
+# MobileNet V4 multi-head (custom UIB backbone, no ImageNet weights)
+from models.architectures.mobilenet_v4_qat_multi import MultiHeadMobileNetV4QATArchitecture
+```
+
+All four classes share the same `MultiHeadMobileNetArchitecture` base, so the rest of this guide (config creation, training loops, separable weights) applies unchanged regardless of which backbone you pick.
+
 ### Creating a Model Programmatically
 
 ```python
@@ -345,7 +358,7 @@ model.save('trained_model.keras')
 
 # 7. Quantize the trained model
 # After training, you can quantize the saved model:
-# python src/create_quantized_mobilenet_v3.py \
+# python src/create_quantized_mobilenet.py \
 #     --keras-model-path trained_model.keras \
 #     --output-dir ./quantized_models \
 #     --calibration-samples 200

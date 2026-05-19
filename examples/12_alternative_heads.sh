@@ -2,6 +2,9 @@
 # Example 12: Alternative Head Types
 # Demonstrates different head architectures for various task types
 
+set -e
+cd "$(dirname "$0")"
+
 echo "========================================="
 echo "Example 12: Alternative Head Types"
 echo "========================================="
@@ -15,7 +18,7 @@ echo "1. Multi-label classification model..."
 python -c "
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, '..')
 
 from models.components.multi_head_model_config import MultiHeadModelConfig
 from models.components.head_configuration import create_multilabel_head, create_classification_head
@@ -29,7 +32,7 @@ binary_head = create_classification_head('person_present', num_classes=2, activa
 config = MultiHeadModelConfig(
     input_shape=(128, 128, 3),
     head_configs=[multilabel_head, binary_head],
-    arch_params={'alpha': 0.25}
+    arch_params={'alpha': 0.25, 'use_pretrained': False}
 )
 
 arch = MultiHeadMobileNetV3QATArchitecture(config)
@@ -52,7 +55,7 @@ echo "2. Regression model..."
 python -c "
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, '..')
 
 from models.components.multi_head_model_config import MultiHeadModelConfig
 from models.components.head_configuration import create_regression_head
@@ -67,7 +70,7 @@ pose_head = create_regression_head('head_pose', n_outputs=3, dropout_rate=0.3)  
 config = MultiHeadModelConfig(
     input_shape=(96, 96, 3),
     head_configs=[age_head, blur_head, pose_head],
-    arch_params={'alpha': 0.25}
+    arch_params={'alpha': 0.25, 'use_pretrained': False}
 )
 
 arch = MultiHeadMobileNetV3QATArchitecture(config)
@@ -91,7 +94,7 @@ echo "3. Embedding model..."
 python -c "
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, '..')
 
 from models.components.multi_head_model_config import MultiHeadModelConfig
 from models.components.head_configuration import create_embedding_head, create_classification_head
@@ -109,9 +112,9 @@ face_embed = create_embedding_head(
 id_head = create_classification_head('identity', num_classes=100, activation='linear')
 
 config = MultiHeadModelConfig(
-    input_shape=(112, 112, 3),
+    input_shape=(128, 128, 3),
     head_configs=[face_embed, id_head],
-    arch_params={'alpha': 0.5}
+    arch_params={'alpha': 0.5, 'use_pretrained': False}
 )
 
 arch = MultiHeadMobileNetV3QATArchitecture(config)
@@ -127,7 +130,7 @@ for head in arch.head_configs:
 
 # Export to TFLite
 tflite_model, _ = quantize_to_tflite(
-    model, (112, 112, 3), calibration_samples=10,
+    model, (128, 128, 3), calibration_samples=10,
     output_path='../output/examples/alternative_heads/embedding_model_int8.tflite'
 )
 print('Embedding model exported successfully!')
@@ -138,7 +141,7 @@ echo "4. Ordinal regression model..."
 python -c "
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, '..')
 
 from models.components.multi_head_model_config import MultiHeadModelConfig
 from models.components.head_configuration import create_ordinal_head
@@ -152,7 +155,7 @@ severity = create_ordinal_head('damage_severity', num_classes=4, threshold_init=
 config = MultiHeadModelConfig(
     input_shape=(224, 224, 3),
     head_configs=[age_group, severity],
-    arch_params={'alpha': 0.25}
+    arch_params={'alpha': 0.25, 'use_pretrained': False}
 )
 
 arch = MultiHeadMobileNetV3QATArchitecture(config)

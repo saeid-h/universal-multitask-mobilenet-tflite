@@ -2,13 +2,16 @@
 # Example 11: Separate TFLite Export
 # Export backbone and heads as separate TFLite files with different precisions
 
+set -e
+cd "$(dirname "$0")"
+
 echo "========================================="
 echo "Example 11: Separate TFLite Export"
 echo "========================================="
 echo "Creating model with separate TFLite exports..."
 echo ""
 
-python ../src/create_quantized_mobilenet_v3.py \
+python ../src/create_quantized_mobilenet.py \
     --alpha 0.75 \
     --input-shape "224x224x3" \
     --heads "5,2,3" \

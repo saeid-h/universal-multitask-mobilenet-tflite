@@ -1,6 +1,6 @@
 # Documentation
 
-This directory contains complete documentation for the Multi-Head MobileNet V3 quantization tool.
+This directory contains complete documentation for the Multi-Head MobileNet quantization tool (supports MobileNet V1/V2/V3-Small/V4 backbones via `--backbone`).
 
 ## Documentation Structure
 
@@ -9,7 +9,7 @@ This directory contains complete documentation for the Multi-Head MobileNet V3 q
 - **[Training Guide](training_guide.md)** - Using the model as a module and training with multiple datasets
 - **[API Reference](api_reference.md)** - Complete command-line parameter documentation
 - **[Examples](examples.md)** - Various use cases and model configurations
-- **[Architecture](architecture.md)** - How multi-head MobileNet V3 works internally
+- **[Architecture](architecture.md)** - How the multi-head MobileNet pipeline works internally (shared backbone + heads)
 - **[Quantization Guide](quantization_guide.md)** - Understanding uint8 quantization
 - **[Pretrained Weights Reference](pretrained_weights_reference.md)** - Which configs support pretrained weights, sizes, and feature vectors
 - **[Troubleshooting](troubleshooting.md)** - Solutions to common problems
@@ -30,11 +30,13 @@ This directory contains complete documentation for the Multi-Head MobileNet V3 q
 
 ## Quick Start
 
-The main script is located at `src/create_quantized_mobilenet_v3.py`. Basic usage:
+The main script is located at `src/create_quantized_mobilenet.py`. Basic usage:
 
 ```bash
-python src/create_quantized_mobilenet_v3.py --heads "5,2,3" --output-dir ./models
+python src/create_quantized_mobilenet.py --backbone v3 --heads "5,2,3" --output-dir ./models
 ```
+
+Use `--backbone v1`, `v2`, or `v4` to build the same heads on a different MobileNet backbone.
 
 Or try the example scripts:
 ```bash

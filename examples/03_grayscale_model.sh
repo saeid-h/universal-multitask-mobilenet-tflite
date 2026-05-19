@@ -2,13 +2,16 @@
 # Example 3: Grayscale Model for Constrained Devices
 # Creates a smaller model using grayscale input
 
+set -e
+cd "$(dirname "$0")"
+
 echo "========================================="
 echo "Example 3: Grayscale Model"
 echo "========================================="
 echo "Creating a grayscale model for memory-constrained devices..."
 echo ""
 
-python ../src/create_quantized_mobilenet_v3.py \
+python ../src/create_quantized_mobilenet.py \
     --alpha 0.25 \
     --input-shape "128x128x1" \
     --heads "2" \

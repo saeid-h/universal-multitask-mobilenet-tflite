@@ -1,6 +1,8 @@
 # Separable Weights Tutorial
 
-A comprehensive guide to using the separable weights feature for modular model management, transfer learning, and efficient inference.
+A comprehensive guide to using the separable-weights feature for modular model management, transfer learning, and efficient inference.
+
+The code examples in this tutorial import `MultiHeadMobileNetV3QATArchitecture`, but the feature is provided by the shared `MultiHeadMobileNetArchitecture` base class. Swap the import for `MultiHeadMobileNetV1QATArchitecture`, `MultiHeadMobileNetV2QATArchitecture`, or `MultiHeadMobileNetV4QATArchitecture` to apply the same workflow to V1, V2, or V4 backbones.
 
 ## Overview
 
@@ -45,7 +47,7 @@ print(f"Separable weights: {architecture.is_separable}")  # True
 
 ```bash
 # Create model with separable weights
-python src/create_quantized_mobilenet_v3.py \
+python src/create_quantized_mobilenet.py \
     --heads "5,2,3" \
     --head-names "object_class,person_detection,age_group" \
     --separable-weights \
@@ -66,7 +68,7 @@ Export backbone and heads as separate TFLite files with different precision form
 
 ```bash
 # Export with mixed precision (int8 backbone, fp16 heads)
-python src/create_quantized_mobilenet_v3.py \
+python src/create_quantized_mobilenet.py \
     --heads "5,2,3" \
     --head-names "object_class,person_detection,age_group" \
     --separable-weights \

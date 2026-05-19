@@ -1,6 +1,17 @@
 # Pretrained Weights Reference
 
-This document summarizes pretrained weight availability for MobileNetV3 models created by this tool, including which configurations can be initialized with pretrained weights and their expected sizes.
+This document summarizes pretrained-weight availability across the four supported MobileNet backbones (V1, V2, V3-Small, V4). The detailed tables below focus on the default V3-Small backbone; for the at-a-glance per-backbone summary see [API Reference → `--use-pretrained`](api_reference.md#--use-pretrained).
+
+**Per-backbone summary**:
+
+| Backbone | ImageNet pretrained | Constraints |
+|---|---|---|
+| `v1` | Yes | All alphas (0.25, 0.5, 0.75, 1.0), RGB only |
+| `v2` | Yes | All alphas (0.35, 0.5, 0.75, 1.0, 1.3, 1.4), RGB only |
+| `v3` | Yes | Alpha **0.75 or 1.0 only**, RGB only (Keras limitation) |
+| `v4` | **No** | Custom UIB-based backbone; no pretrained weights bundled |
+
+All backbones disable pretrained weights for grayscale (1-channel) inputs.
 
 ## Keras vs TFLite for QAT Models
 
@@ -90,22 +101,22 @@ The current CLI does not support this.
 
 ```bash
 # Pretrained works
-python src/create_quantized_mobilenet_v3.py \
+python src/create_quantized_mobilenet.py \
   --alpha 0.75 --input-shape "224x224x3" --heads "5,2" \
   --output-dir ./models --use-pretrained
 
 # Pretrained works
-python src/create_quantized_mobilenet_v3.py \
+python src/create_quantized_mobilenet.py \
   --alpha 1.0 --input-shape "128x128x3" --heads "2" \
   --output-dir ./models --use-pretrained
 
 # Pretrained does NOT work (alpha 0.25)
-python src/create_quantized_mobilenet_v3.py \
+python src/create_quantized_mobilenet.py \
   --alpha 0.25 --input-shape "224x224x3" --heads "2" \
   --output-dir ./models --use-pretrained  # Error
 
 # Pretrained does NOT work (grayscale)
-python src/create_quantized_mobilenet_v3.py \
+python src/create_quantized_mobilenet.py \
   --alpha 0.75 --input-shape "224x224x1" --heads "2" \
   --output-dir ./models --use-pretrained  # Error
 ```

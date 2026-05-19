@@ -52,19 +52,46 @@ The directory will be created if it doesn't exist.
 
 ### Optional Arguments
 
+#### `--backbone`
+
+MobileNet backbone version to use.
+
+**Options**: `v1`, `v2`, `v3`, `v4`
+
+**Default**: `v3` (which preserves the tool's original V3-Small-only behavior)
+
+**Behavior**:
+- `v1` → `tf.keras.applications.MobileNet`
+- `v2` → `tf.keras.applications.MobileNetV2`
+- `v3` → `tf.keras.applications.MobileNetV3Small`
+- `v4` → project's custom `MobileNetV4ConvS` (no Keras-applications entry exists for V4)
+
+Output filenames are auto-prefixed with the backbone version: `mnv1_*`, `mnv2_*`, `mnv3_*`, `mnv4_*`. Per-version alpha validation runs inside each architecture's `validate_config()`; see `--alpha` below for the valid set per backbone.
+
 #### `--alpha`
 
 Width multiplier controlling model size and capacity.
 
-**Options**: `0.25`, `0.50`, `0.75`, `1.0`
-
 **Default**: `0.25`
 
-**Guidelines**:
+**Valid set per backbone**:
+
+| Backbone | Valid alphas |
+|---|---|
+| `v1` | 0.25, 0.50, 0.75, 1.0 |
+| `v2` | 0.35, 0.50, 0.75, 1.0, 1.3, 1.4 |
+| `v3` | 0.25, 0.50, 0.75, 1.0 |
+| `v4` | 0.25, 0.50, 0.75, 1.0 (interpreted as width multiplier on MobileNetV4-Conv-S) |
+
+Passing an alpha not in the chosen backbone's valid set raises a `ValueError` with a clear per-version message. The CLI itself does not restrict alpha to enable per-version validation.
+
+**Guidelines for V3 (default backbone)**:
 - 0.25: Smallest model (~100KB quantized), fastest inference
 - 0.50: Medium model (~400KB quantized)
 - 0.75: Larger model (~900KB quantized), supports pretrained weights
 - 1.0: Largest model (~1.5MB quantized), supports pretrained weights
+
+See [Architecture](architecture.md#model-size) for full per-backbone parameter ranges.
 
 #### `--input-shape`
 
@@ -112,16 +139,26 @@ Output files will be:
 
 #### `--use-pretrained`
 
-Use ImageNet pretrained weights for the backbone.
+Use ImageNet pretrained weights for the backbone (where supported).
 
 **Default**: Not used (False)
 
-**Requirements**:
-- Only works with alpha 0.75 or 1.0
-- Requires RGB input (3 channels)
-- Backbone will be frozen (non-trainable)
+**Pretrained-weight availability by backbone**:
 
-**Example**: `--alpha 0.75 --use-pretrained`
+| Backbone | Pretrained support |
+|---|---|
+| `v1` | All alphas, RGB only |
+| `v2` | All alphas, RGB only |
+| `v3` | Alpha 0.75 or 1.0 only, RGB only (Keras MobileNetV3 limitation) |
+| `v4` | Not supported (no pretrained weights bundled with the custom V4 implementation) |
+
+**Common requirements**:
+- Requires RGB input (3 channels). The flag is silently treated as `False` for grayscale inputs.
+- When applied, the backbone is frozen (`trainable=False`) so only the heads train.
+
+Each architecture enforces its own rules in `validate_config()`. Passing `--use-pretrained` with an unsupported combination raises a `ValueError` describing the constraint.
+
+**Example**: `--backbone v3 --alpha 0.75 --use-pretrained --input-shape 224x224x3`
 
 #### `--calibration-samples`
 
@@ -310,7 +347,7 @@ The script supports two modes:
 Create a new model from scratch and quantize it:
 
 ```bash
-python src/create_quantized_mobilenet_v3.py \
+python src/create_quantized_mobilenet.py \
     --heads "5,2,3" \
     --output-dir ./models
 ```
@@ -320,7 +357,7 @@ python src/create_quantized_mobilenet_v3.py \
 Load an existing trained model and quantize it:
 
 ```bash
-python src/create_quantized_mobilenet_v3.py \
+python src/create_quantized_mobilenet.py \
     --keras-model-path ./trained_model.keras \
     --output-dir ./models
 ```

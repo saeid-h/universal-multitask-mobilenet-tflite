@@ -1,19 +1,21 @@
 # Architecture
 
-How multi-head MobileNet V3 models work and what makes them efficient.
+How multi-head MobileNet models work and what makes them efficient.
 
 ## Overview
 
-Multi-head MobileNet V3 uses a shared backbone (feature extractor) with multiple classification heads. The backbone processes the input image once, and each head makes predictions based on the same features.
+The multi-head MobileNet pipeline uses a shared backbone (feature extractor) with multiple task heads. The backbone processes the input image once, and each head makes predictions based on the same features.
 
-## Backbone: MobileNet V3
+## Backbone: MobileNet V1 / V2 / V3-Small / V4
 
-The backbone is a MobileNet V3 Small architecture, which is optimized for mobile and edge devices. Key features:
+The backbone is one of four MobileNet variants, selected via `--backbone {v1,v2,v3,v4}` (default `v3`). Each is optimized for mobile and edge devices, and all share a common pattern: depthwise-separable or universal-inverted-bottleneck blocks, mobile-friendly activations, and a width multiplier (`alpha`) that controls model capacity.
 
-- Depthwise separable convolutions reduce computation
-- Squeeze-and-Excitation blocks improve feature quality
-- Hard-swish activations for efficiency
-- Width multiplier (alpha) controls model capacity
+| Backbone | Source | Alphas | ImageNet pretrained | Notes |
+|---|---|---|---|---|
+| `v1` | `tf.keras.applications.MobileNet` | 0.25, 0.5, 0.75, 1.0 | Yes (RGB) | Depthwise-separable convs only. |
+| `v2` | `tf.keras.applications.MobileNetV2` | 0.35, 0.5, 0.75, 1.0, 1.3, 1.4 | Yes (RGB) | Inverted residuals + linear bottlenecks. |
+| `v3` | `tf.keras.applications.MobileNetV3Small` | 0.25, 0.5, 0.75, 1.0 | Yes (RGB, alpha 0.75/1.0 only) | SE blocks + hard-swish. **Default.** |
+| `v4` | Custom UIB-based `MobileNetV4ConvS` | 0.25, 0.5, 0.75, 1.0 (interpreted as width multiplier) | No | Universal Inverted Bottleneck blocks. |
 
 The backbone extracts features from the input image and produces a feature map. This happens once, regardless of how many heads you have.
 
@@ -36,11 +38,19 @@ All heads share the same backbone features but have separate final layers. This 
 
 Model size depends on:
 
-**Backbone**: Determined by alpha parameter
-- Alpha 0.25: ~100K parameters
-- Alpha 0.50: ~400K parameters
-- Alpha 0.75: ~900K parameters
-- Alpha 1.0: ~1.5M parameters
+**Backbone**: Determined by `--backbone` and `--alpha` together. Approximate parameter counts (backbone only):
+
+| alpha | v1 | v2 | v3 | v4 |
+|---|---|---|---|---|
+| 0.25 | ~250K | — | ~100K | ~250K |
+| 0.35 | — | ~250K | — | — |
+| 0.50 | ~1.0M | ~500K | ~400K | ~1.0M |
+| 0.75 | ~2.25M | ~1.1M | ~900K | ~2.25M |
+| 1.0 | ~4.0M | ~2.2M | ~1.5M | ~4.0M |
+| 1.3 | — | ~3.8M | — | — |
+| 1.4 | — | ~4.4M | — | — |
+
+V3-Small is the smallest at every alpha; V1 and V4 are roughly comparable; V2 is in between.
 
 **Heads**: Each head adds roughly ~1000 parameters per class
 - Head with 2 classes: ~2K parameters

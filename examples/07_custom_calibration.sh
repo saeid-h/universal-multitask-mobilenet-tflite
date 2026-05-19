@@ -2,13 +2,16 @@
 # Example 7: Custom Calibration Samples
 # Demonstrates using more calibration samples for better quantization
 
+set -e
+cd "$(dirname "$0")"
+
 echo "========================================="
 echo "Example 7: Custom Calibration Samples"
 echo "========================================="
 echo "Creating model with high-quality quantization..."
 echo ""
 
-python ../src/create_quantized_mobilenet_v3.py \
+python ../src/create_quantized_mobilenet.py \
     --alpha 0.25 \
     --input-shape "224x224x3" \
     --heads "10,5,3" \

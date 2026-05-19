@@ -2,13 +2,16 @@
 # Example 1: Basic Single-Head Model
 # Creates a simple binary classification model (e.g., person/no-person detection)
 
+set -e
+cd "$(dirname "$0")"
+
 echo "========================================="
 echo "Example 1: Basic Single-Head Model"
 echo "========================================="
 echo "Creating a binary classification model..."
 echo ""
 
-python ../src/create_quantized_mobilenet_v3.py \
+python ../src/create_quantized_mobilenet.py \
     --alpha 0.25 \
     --input-shape "224x224x3" \
     --heads "2" \

@@ -1,7 +1,10 @@
 #!/bin/bash
 # Create 128x128 grayscale multi-head model with heads: 5,2,5,3,3
 
-python ../src/create_quantized_mobilenet_v3.py \
+set -e
+cd "$(dirname "$0")"
+
+python ../src/create_quantized_mobilenet.py \
     --alpha 0.25 \
     --input-shape "128x128x1" \
     --heads "5,2,5,3,3" \

@@ -2,13 +2,16 @@
 # Example 5: High-Resolution Model
 # Creates a model for detailed recognition tasks
 
+set -e
+cd "$(dirname "$0")"
+
 echo "========================================="
 echo "Example 5: High-Resolution Model"
 echo "========================================="
 echo "Creating a high-resolution model for detailed tasks..."
 echo ""
 
-python ../src/create_quantized_mobilenet_v3.py \
+python ../src/create_quantized_mobilenet.py \
     --alpha 0.50 \
     --input-shape "320x320x3" \
     --heads "50,10" \

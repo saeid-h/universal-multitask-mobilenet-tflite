@@ -2,6 +2,9 @@
 # Example 8: Quantize a Trained Model
 # Demonstrates loading and quantizing an existing trained Keras model
 
+set -e
+cd "$(dirname "$0")"
+
 echo "========================================="
 echo "Example 8: Quantize a Trained Model"
 echo "========================================="
@@ -27,7 +30,7 @@ echo "Loading and quantizing trained model..."
 echo "  Model: $TRAINED_MODEL"
 echo ""
 
-python ../src/create_quantized_mobilenet_v3.py \
+python ../src/create_quantized_mobilenet.py \
     --keras-model-path "$TRAINED_MODEL" \
     --output-dir ../output/examples/quantized_trained \
     --output-name "quantized_from_trained" \
