@@ -77,11 +77,39 @@ def _validate_args(args):
 
 
 def _parse_head_config(heads_str: str, head_names_str: str = None):
-    """Parse head configuration from command-line arguments."""
+    """Parse head configuration from command-line arguments.
+
+    Each entry in --heads is "NUM_CLASSES" or "NUM_CLASSES@TAP_STRIDE".
+    Examples:
+      --heads "5,2,3"          -> three heads at default tap (final feature map)
+      --heads "5@32,2@16,3@8"  -> three heads at strides 32, 16, 8
+
+    Returns:
+        (head_classes, head_names, head_strides) — head_strides is a list
+        of Optional[int] with one entry per head; None means default.
+    """
+    head_classes = []
+    head_strides = []
     try:
-        head_classes = [int(x.strip()) for x in heads_str.split(',')]
-        if not head_classes or any(c < 1 for c in head_classes):
-            raise ValueError("Each head must have at least 1 class")
+        for raw in heads_str.split(','):
+            token = raw.strip()
+            if '@' in token:
+                cls_str, stride_str = token.split('@', 1)
+                num_classes = int(cls_str.strip())
+                tap_stride = int(stride_str.strip())
+                if tap_stride < 1:
+                    raise ValueError(
+                        f"tap_stride must be a positive integer, got {tap_stride}"
+                    )
+            else:
+                num_classes = int(token)
+                tap_stride = None
+            if num_classes < 1:
+                raise ValueError("Each head must have at least 1 class")
+            head_classes.append(num_classes)
+            head_strides.append(tap_stride)
+        if not head_classes:
+            raise ValueError("--heads must list at least one head")
     except ValueError as e:
         raise ValueError(f"Invalid head configuration: {e}")
 
@@ -94,7 +122,7 @@ def _parse_head_config(heads_str: str, head_names_str: str = None):
                 f"number of heads ({len(head_classes)})"
             )
 
-    return head_classes, head_names
+    return head_classes, head_names, head_strides
 
 
 def _create_new_model(args, input_shape):
@@ -106,17 +134,38 @@ def _create_new_model(args, input_shape):
     print(f"  Alpha: {args.alpha}")
     print(f"  Input shape: {input_shape}")
 
-    # Parse head configuration
-    head_classes, head_names = _parse_head_config(args.heads, args.head_names)
-    print(f"  Heads: {head_classes}")
+    # Parse head configuration (counts + optional per-head tap strides)
+    head_classes, head_names, head_strides = _parse_head_config(args.heads, args.head_names)
+    has_spatial_tap = any(s is not None and s < 32 for s in head_strides)
+    if any(s is not None for s in head_strides):
+        per_head = [
+            f"{c}@{s}" if s is not None else str(c)
+            for c, s in zip(head_classes, head_strides)
+        ]
+        print(f"  Heads: {per_head}")
+    else:
+        print(f"  Heads: {head_classes}")
 
     # Check unified output for single-head models
     if args.unified_output and len(head_classes) == 1:
         print("  Note: --unified-output ignored for single-head models (not needed)")
         args.unified_output = False
 
-    # Create head configurations
+    # Reject the combo early with a clear CLI-level message; the architecture
+    # also enforces this internally, but catching it here gives a nicer error.
+    if args.unified_output and has_spatial_tap:
+        raise ValueError(
+            "--unified-output is incompatible with heads that use a tap_stride "
+            "below 32 (spatial taps), because the unified output concatenates "
+            "1D head outputs. Drop --unified-output or move spatial heads "
+            "back to the default tap."
+        )
+
+    # Create head configurations (manually so per-head tap_stride is wired in)
     head_configs = create_head_config_from_list(head_classes, head_names)
+    for head_config, stride in zip(head_configs, head_strides):
+        if stride is not None:
+            head_config.tap_stride = stride
 
     # Override activation for Vela compatibility (default behavior)
     if args.vela_compatible:
@@ -490,7 +539,7 @@ def main():
             model_name = Path(args.keras_model_path).stem
             output_name = f"{model_name}_quantized"
         else:
-            head_classes, _ = _parse_head_config(args.heads)
+            head_classes, _, _ = _parse_head_config(args.heads)
             output_name = generate_output_name(
                 args.alpha, input_shape, head_classes, backbone=args.backbone
             )
