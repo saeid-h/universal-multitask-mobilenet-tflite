@@ -17,6 +17,7 @@ from tensorflow.keras.applications import MobileNetV2
 
 from ..factory import ModelArchitectureFactory
 from .multi_head_base import MultiHeadMobileNetArchitecture
+from ._keras_app_taps import features_by_stride_from_keras_model
 
 
 _ALPHA_NAME = {
@@ -126,6 +127,19 @@ class MultiHeadMobileNetV2QATArchitecture(MultiHeadMobileNetArchitecture):
             backbone.trainable = False
 
         return backbone
+
+    def _features_by_stride(
+        self,
+        backbone: tf.keras.Model,
+        input_tensor: tf.Tensor,
+        backbone_output: tf.Tensor,
+    ) -> Dict[int, tf.Tensor]:
+        """Expose stride-4/8/16/32 feature maps from MobileNetV2."""
+        return features_by_stride_from_keras_model(
+            backbone,
+            input_tensor,
+            self.config.input_shape,
+        )
 
 
 def create_mobilenet_v2_qat_multi_configs() -> List[Tuple[str, Dict[str, Any]]]:

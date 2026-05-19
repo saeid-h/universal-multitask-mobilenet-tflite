@@ -28,6 +28,7 @@ from ..components import (
 )
 from .multi_head_base import MultiHeadMobileNetArchitecture
 from .mobilenet_v4 import MobileNetV4ConvS
+from ._keras_app_taps import features_by_stride_from_keras_model
 
 
 _ALPHA_NAME = {
@@ -192,6 +193,25 @@ class MultiHeadMobileNetV4QATArchitecture(MultiHeadMobileNetArchitecture):
             name=f"mobilenet_v4_conv_s_backbone_{_ALPHA_NAME.get(alpha, alpha)}",
         )
         return backbone
+
+    def _features_by_stride(
+        self,
+        backbone: tf.keras.Model,
+        input_tensor: tf.Tensor,
+        backbone_output: tf.Tensor,
+    ) -> Dict[int, tf.Tensor]:
+        """Expose stride-4/8/16/32 feature maps from the custom V4 backbone.
+
+        The same shape-based helper used for V1/V2/V3 also works here:
+        V4's UIB blocks wrap standard Keras layers internally, so the
+        intermediate spatial resolutions are discoverable via layer
+        output shapes.
+        """
+        return features_by_stride_from_keras_model(
+            backbone,
+            input_tensor,
+            self.config.input_shape,
+        )
 
 
 def create_mobilenet_v4_qat_multi_configs() -> List[Tuple[str, Dict[str, Any]]]:
