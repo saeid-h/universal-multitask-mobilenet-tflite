@@ -33,4 +33,7 @@ from . import mobilenet_v3_qat_multi
 # Import multi-head MobileNetV1 QAT architecture
 from . import mobilenet_v1_qat_multi
 
+# Import multi-head MobileNetV2 QAT architecture
+from . import mobilenet_v2_qat_multi
+
 __version__ = '0.2.0' 

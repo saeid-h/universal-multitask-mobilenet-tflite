@@ -23,6 +23,7 @@ from models.components.multi_head_model_config import MultiHeadModelConfig
 from models.components.head_configuration import create_head_config_from_list
 from models.architectures.mobilenet_v3_qat_multi import MultiHeadMobileNetV3QATArchitecture
 from models.architectures.mobilenet_v1_qat_multi import MultiHeadMobileNetV1QATArchitecture
+from models.architectures.mobilenet_v2_qat_multi import MultiHeadMobileNetV2QATArchitecture
 
 from src.utils import (
     parse_input_shape,
@@ -40,6 +41,7 @@ from src.utils import (
 # populated as their multi-head classes land in later stages.
 _BACKBONE_TO_ARCH = {
     'v1': MultiHeadMobileNetV1QATArchitecture,
+    'v2': MultiHeadMobileNetV2QATArchitecture,
     'v3': MultiHeadMobileNetV3QATArchitecture,
 }
 
