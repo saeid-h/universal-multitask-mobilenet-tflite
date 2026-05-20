@@ -57,7 +57,18 @@ python src/create_quantized_mobilenet.py \
 
 **Adding a head later**: `MultiHeadMobileNetArchitecture.add_head_dynamically(tap_stride=...)` attaches a new head to an existing model — typically with `freeze_backbone=True`, so retraining only touches the new head. See `examples/17_dynamic_head_addition.sh` and the [Training Guide](training_guide.md#adding-a-head-later).
 
-**Why not FPN?** FPN (feature pyramid networks) would add a learnable fusion layer (lateral 1×1 convs + top-down upsample-and-add) on top of the multi-tap idea, producing richer features at each level. Single-tap is the minimum that handles the "different heads, different scales" use case without introducing shared learnable state between heads — which keeps the freeze-backbone-and-add-a-head workflow clean. FPN can be added later as an opt-in mode without breaking the single-tap API.
+**Why not FPN by default?** FPN (feature pyramid networks) adds a learnable fusion layer (lateral 1×1 convs + top-down upsample-and-add) on top of the multi-tap idea, producing richer features at each level. Single-tap is the minimum that handles the "different heads, different scales" use case without introducing shared learnable state between heads — which keeps the freeze-backbone-and-add-a-head workflow clean. FPN is available as an opt-in mode (`--fusion fpn`) without breaking the single-tap API.
+
+## FPN fusion (opt-in)
+
+`--fusion fpn` (or `MultiHeadModelConfig.fusion='fpn'` in the Python API) wraps the per-stride feature taps in a top-down feature pyramid network: at each stride a 1×1 lateral conv projects to `--fpn-channels` (default 128), then going coarse-to-fine the previous level is upsampled (nearest-neighbor) and added to the lateral, and a 3×3 conv smooths the result. Each head consumes the corresponding FPN level instead of the raw backbone feature map.
+
+- **Strides built**: only the strides actually used by heads (plus the coarsest, so heads with `tap_stride=None` have a well-defined FPN level to consume). Unused strides skip the cost.
+- **Head shape contract**: unchanged — classification heads still collapse to 1D via their internal GAP, spatial heads still produce 4D outputs at the FPN level's resolution. Only the *features* they read differ.
+- **Channels**: `--fpn-channels` (default 128) trades model size against representational capacity. For MCU-class targets, 32–64 is plenty.
+- **Hardware**: nearest-neighbor upsample + 3×3 conv compiles cleanly under Vela; no special handling needed.
+- **Frozen-backbone workflow**: FPN convs are learnable and *shared across heads*. If you add a head later with `add_head_dynamically()` and want the freeze guarantee, also freeze the FPN — otherwise gradients from the new head will flow back through the FPN and can shift features the existing heads depend on. Single-tap mode is the recommended choice for that workflow.
+- **Tested via** `examples/20_fpn_fusion.sh` and `tests/test_fpn.py`.
 
 ## Model Size
 

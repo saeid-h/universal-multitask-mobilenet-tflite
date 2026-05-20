@@ -221,6 +221,20 @@ Add a unified concatenated output for multi-head models.
 
 **Incompatibility with feature taps**: `--unified-output` cannot be combined with heads that use a `@STRIDE < 32` in `--heads`. The unified output concatenates 1D head outputs; spatial heads (which produce 4D feature maps) break that contract. Drop `--unified-output` or move the spatial heads back to the default tap.
 
+#### `--fusion` / `--fpn-channels`
+
+Cross-scale feature fusion mode.
+
+**`--fusion` options**:
+- `none` (default): single-tap. Each head reads its `tap_stride` feature map directly from the backbone. No extra learnable layers between backbone and heads.
+- `fpn`: top-down feature pyramid network. Lateral 1×1 conv at every stride a head uses, plus an upsample-and-add pathway from coarsest to finest. Each head consumes the FPN level instead of the raw backbone stride. See [Architecture → FPN fusion](architecture.md#fpn-fusion-opt-in).
+
+**`--fpn-channels`**: integer channel count for every FPN level. Default `128`. Lower it (32–64) for MCU-class deployment.
+
+**Example**: `--heads "5@32,2@16,3@8" --fusion fpn --fpn-channels 64`
+
+**When to use FPN**: small-object detection or fine segmentation where the higher-resolution feature maps benefit from semantic content pushed down from the coarser layers. For pure classification or where the freeze-backbone-and-add-a-head workflow matters more, stay with `--fusion none`.
+
 #### `--separable-weights`
 
 Enable separable weight management. Allows saving/loading backbone and heads separately, feature caching, and dynamic head operations.

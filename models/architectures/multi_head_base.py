@@ -56,7 +56,11 @@ class MultiHeadMobileNetArchitecture(MobileNetArchitecture):
         
         # Store separable weights flag
         self._separable_weights = config.separable_weights
-        
+
+        # Cross-scale fusion settings (None = single-tap, 'fpn' = top-down FPN)
+        self._fusion = config.fusion
+        self._fpn_channels = config.fpn_channels
+
         # Cache for backbone and head models (for separable weights feature)
         self._backbone_model: Optional[tf.keras.Model] = None
         self._head_models: Dict[str, tf.keras.Model] = {}
@@ -301,6 +305,80 @@ class MultiHeadMobileNetArchitecture(MobileNetArchitecture):
         from ..components.head_builders import build_head_for_type
         return build_head_for_type(head_config.head_type, head_config, backbone_output)
     
+    def _build_fpn(
+        self,
+        features: Dict[int, tf.Tensor],
+        used_strides: List[int],
+        fpn_channels: int,
+    ) -> Dict[int, tf.Tensor]:
+        """Build a top-down FPN over the strides actually used by heads.
+
+        Implements the standard FPN pattern (Lin et al. 2017): at each
+        used stride apply a 1x1 lateral conv to project to fpn_channels;
+        going coarse-to-fine, upsample (nearest-neighbor) the previous
+        level and add to the lateral; smooth with a 3x3 conv. Only the
+        strides in ``used_strides`` are built — unused strides skip the
+        cost.
+
+        Args:
+            features: {stride: tensor} from _features_by_stride().
+            used_strides: List of strides heads actually consume.
+            fpn_channels: Channel count for every FPN level.
+
+        Returns:
+            {stride: fpn_tensor} dict, one entry per used stride.
+        """
+        ordered = sorted(set(used_strides), reverse=True)  # coarsest first
+        fpn: Dict[int, tf.Tensor] = {}
+
+        # Top of the pyramid: lateral conv only.
+        top_stride = ordered[0]
+        if top_stride not in features:
+            raise ValueError(
+                f"FPN: backbone has no feature map at stride {top_stride}; "
+                f"available strides: {sorted(features.keys())}"
+            )
+        prev = layers.Conv2D(
+            fpn_channels, 1, padding='same',
+            name=f'fpn_lateral_{top_stride}',
+        )(features[top_stride])
+        fpn[top_stride] = prev
+
+        # Top-down pathway.
+        prev_stride = top_stride
+        for stride in ordered[1:]:
+            if stride not in features:
+                raise ValueError(
+                    f"FPN: backbone has no feature map at stride {stride}; "
+                    f"available strides: {sorted(features.keys())}"
+                )
+            ratio = prev_stride // stride
+            if prev_stride % stride != 0 or ratio < 2:
+                # Non-power-of-2 spacing isn't a supported FPN topology.
+                raise ValueError(
+                    f"FPN: used strides must be a descending chain where each "
+                    f"is a multiple of the next; got {ordered}"
+                )
+            upsampled = layers.UpSampling2D(
+                size=(ratio, ratio),
+                interpolation='nearest',
+                name=f'fpn_up_{prev_stride}_to_{stride}',
+            )(prev)
+            lateral = layers.Conv2D(
+                fpn_channels, 1, padding='same',
+                name=f'fpn_lateral_{stride}',
+            )(features[stride])
+            merged = layers.Add(name=f'fpn_merge_{stride}')([upsampled, lateral])
+            smoothed = layers.Conv2D(
+                fpn_channels, 3, padding='same',
+                name=f'fpn_smooth_{stride}',
+            )(merged)
+            fpn[stride] = smoothed
+            prev = smoothed
+            prev_stride = stride
+
+        return fpn
+
     def _features_by_stride(
         self,
         backbone: tf.keras.Model,
@@ -375,12 +453,40 @@ class MultiHeadMobileNetArchitecture(MobileNetArchitecture):
                 "heads' tap_stride to None (final feature map)."
             )
 
+        # Optional cross-scale fusion. With fusion='fpn', build an FPN
+        # over the strides actually used by heads, and route heads to
+        # the FPN level instead of the raw backbone feature map.
+        if self._fusion == 'fpn':
+            if not features:
+                raise ValueError(
+                    "fusion='fpn' requires the backbone to expose stride taps "
+                    "(via _features_by_stride), but the current backbone "
+                    "returned an empty dict."
+                )
+            # The set of strides FPN should cover: every head's tap_stride,
+            # plus the coarsest stride (so heads with tap_stride=None get a
+            # well-defined FPN level to consume).
+            coarsest = max(features.keys())
+            used_strides = {
+                (h.tap_stride if h.tap_stride is not None else coarsest)
+                for h in self.head_configs
+            }
+            features = self._build_fpn(
+                features, list(used_strides), self._fpn_channels,
+            )
+            fpn_default = max(features.keys())  # the coarsest FPN level
+        else:
+            fpn_default = None
+
         # Create multiple heads
         outputs = {}
         head_outputs_list = []
         for head_config in self.head_configs:
             if head_config.tap_stride is None:
-                head_input = backbone_output
+                if self._fusion == 'fpn':
+                    head_input = features[fpn_default]
+                else:
+                    head_input = backbone_output
             else:
                 if head_config.tap_stride not in features:
                     available = sorted(features.keys()) if features else "none (backbone does not expose stride taps)"

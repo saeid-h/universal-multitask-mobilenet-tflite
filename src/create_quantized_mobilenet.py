@@ -175,6 +175,7 @@ def _create_new_model(args, input_shape):
             head_config.activation = 'linear'  # Remove softmax, output logits
 
     # Create model configuration
+    fusion = None if args.fusion == 'none' else args.fusion
     config = MultiHeadModelConfig(
         input_shape=input_shape,
         head_configs=head_configs,
@@ -184,11 +185,15 @@ def _create_new_model(args, input_shape):
         },
         training_mode='joint',
         inference_mode='all_active',
-        separable_weights=args.separable_weights
+        separable_weights=args.separable_weights,
+        fusion=fusion,
+        fpn_channels=args.fpn_channels,
     )
 
     if args.separable_weights:
         print(f"  Separable weights: Enabled")
+    if fusion:
+        print(f"  Fusion: {fusion} (fpn_channels={args.fpn_channels})")
 
     # Create architecture
     architecture = arch_class(config, unified_output=args.unified_output)
@@ -474,6 +479,25 @@ def main():
         dest='vela_compatible',
         action='store_false',
         help='Include softmax activation in model (not compatible with Vela compilation)'
+    )
+
+    # Cross-scale feature fusion
+    parser.add_argument(
+        '--fusion',
+        type=str,
+        choices=['none', 'fpn'],
+        default='none',
+        help='Cross-scale feature fusion mode. "none" (default) uses '
+             'single-tap routing: each head reads its tap_stride feature '
+             'map directly. "fpn" builds a top-down feature pyramid network '
+             'over the strides actually used by heads, and routes heads to '
+             'the FPN level instead of the raw backbone stride.'
+    )
+    parser.add_argument(
+        '--fpn-channels',
+        type=int,
+        default=128,
+        help='Channel count for each FPN level when --fusion=fpn (default: 128).'
     )
 
     # Unified output option
