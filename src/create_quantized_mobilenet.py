@@ -25,6 +25,7 @@ from models.architectures.mobilenet_v3_qat_multi import MultiHeadMobileNetV3QATA
 from models.architectures.mobilenet_v1_qat_multi import MultiHeadMobileNetV1QATArchitecture
 from models.architectures.mobilenet_v2_qat_multi import MultiHeadMobileNetV2QATArchitecture
 from models.architectures.mobilenet_v4_qat_multi import MultiHeadMobileNetV4QATArchitecture
+from models.architectures.mobilenet_v3_small_qat_multi import MultiHeadMobileNetV3SmallCustomQATArchitecture
 
 from src.utils import (
     parse_input_shape,
@@ -41,13 +42,14 @@ from src.utils import (
 # Map --backbone choice to architecture class. Entries for v1/v2/v4 are
 # populated as their multi-head classes land in later stages.
 _BACKBONE_TO_ARCH = {
-    'v1': MultiHeadMobileNetV1QATArchitecture,
-    'v2': MultiHeadMobileNetV2QATArchitecture,
-    'v3': MultiHeadMobileNetV3QATArchitecture,
-    'v4': MultiHeadMobileNetV4QATArchitecture,
+    'v1':  MultiHeadMobileNetV1QATArchitecture,
+    'v2':  MultiHeadMobileNetV2QATArchitecture,
+    'v3':  MultiHeadMobileNetV3QATArchitecture,
+    'v3c': MultiHeadMobileNetV3SmallCustomQATArchitecture,  # custom V3-Small (broader input shapes, no pretrained)
+    'v4':  MultiHeadMobileNetV4QATArchitecture,
 }
 
-_BACKBONE_CHOICES = ['v1', 'v2', 'v3', 'v4']
+_BACKBONE_CHOICES = ['v1', 'v2', 'v3', 'v3c', 'v4']
 
 
 def _resolve_architecture_class(backbone: str):

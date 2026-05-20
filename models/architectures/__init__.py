@@ -39,4 +39,7 @@ from . import mobilenet_v2_qat_multi
 # Import multi-head MobileNetV4 QAT architecture
 from . import mobilenet_v4_qat_multi
 
+# Import multi-head custom MobileNetV3-Small QAT architecture (non-Keras-applications)
+from . import mobilenet_v3_small_qat_multi
+
 __version__ = '0.2.0' 
