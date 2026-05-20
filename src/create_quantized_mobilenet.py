@@ -273,7 +273,8 @@ def _quantize_and_report(
                 output_name,
                 backbone_format=args.backbone_format,
                 head_format=args.head_format,
-                calibration_samples=args.calibration_samples
+                calibration_samples=args.calibration_samples,
+                calibration_data_dir=args.calibration_data_dir,
             )
 
             # Report separate export results
@@ -285,12 +286,17 @@ def _quantize_and_report(
 
     # Quantize to TFLite (unified model)
     print("Quantizing to TFLite (uint8)...")
+    if args.calibration_data_dir:
+        print(f"  Calibration data: {args.calibration_data_dir}")
+    else:
+        print("  Calibration data: random (no --calibration-data-dir set)")
     tflite_path = output_dir / f"{output_name}_int8.tflite"
     tflite_model, quantization_info = quantize_to_tflite(
         model,
         input_shape,
         args.calibration_samples,
-        str(tflite_path)
+        str(tflite_path),
+        calibration_data_dir=args.calibration_data_dir,
     )
 
     # Report file size
@@ -424,6 +430,17 @@ def main():
         type=int,
         default=100,
         help='Number of samples for quantization calibration (default: 100)'
+    )
+
+    parser.add_argument(
+        '--calibration-data-dir',
+        type=str,
+        default=None,
+        help='Directory of real images to use as the representative dataset '
+             'for int8 calibration (recursively scans for .jpg/.png/.bmp/etc.). '
+             'Images are resized to --input-shape and scaled to [0, 1]. If '
+             'fewer images than --calibration-samples are found, the dataset '
+             'cycles. Default: None (random data in [0, 1], same as before).'
     )
 
     # Save options

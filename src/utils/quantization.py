@@ -2,63 +2,131 @@
 
 import os
 import tempfile
-from typing import Dict, Tuple, Optional, Any
+from pathlib import Path
+from typing import Dict, Tuple, Optional, Any, List
 
 import numpy as np
 import tensorflow as tf
 
 
+# Image extensions the directory-based representative dataset will pick up.
+_IMG_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.bmp', '.gif', '.webp'}
+
+
+def _list_images_in_dir(image_dir: str) -> List[Path]:
+    """Return sorted image paths under image_dir (recursive, deduped)."""
+    root = Path(image_dir)
+    if not root.is_dir():
+        raise ValueError(
+            f"--calibration-data-dir is not a directory: {image_dir}"
+        )
+    files = sorted(
+        p for p in root.rglob('*')
+        if p.is_file() and p.suffix.lower() in _IMG_EXTENSIONS
+    )
+    if not files:
+        raise ValueError(
+            f"--calibration-data-dir contains no images "
+            f"(supported extensions: {sorted(_IMG_EXTENSIONS)}): {image_dir}"
+        )
+    return files
+
+
+def _load_and_preprocess_image(
+    path: Path,
+    input_shape: Tuple[int, int, int],
+) -> np.ndarray:
+    """Load an image and shape it into a (1, H, W, C) float32 batch in [0, 1]."""
+    h, w, c = input_shape
+    raw = tf.io.read_file(str(path))
+    # decode_image returns a 3D tensor; force expand_animations=False so GIFs
+    # come back as a single frame rather than a 4D animation tensor.
+    img = tf.io.decode_image(raw, channels=c, expand_animations=False)
+    img = tf.image.resize(img, (h, w), method='bilinear')
+    img = tf.cast(img, tf.float32) / 255.0  # match the random-gen [0, 1] range
+    return img.numpy().reshape((1, h, w, c)).astype(np.float32)
+
+
 def create_representative_dataset(
     input_shape: Tuple[int, int, int],
-    num_samples: int
+    num_samples: int,
+    image_dir: Optional[str] = None,
 ):
     """
-    Create representative dataset generator for quantization calibration.
-    
+    Create a representative-dataset generator for TFLite int8 calibration.
+
+    Without ``image_dir`` this falls back to the original behavior: random
+    float data in [0, 1] matching ``input_shape``. With ``image_dir``,
+    images are loaded from that directory, resized to ``input_shape``'s
+    spatial dims (RGB or grayscale per channel count), and scaled to
+    [0, 1] — yielded one batch at a time.
+
     Args:
-        input_shape: Input shape as (height, width, channels)
-        num_samples: Number of calibration samples to generate
-        
-    Yields:
-        Batches of random data matching the input shape
+        input_shape: Input shape as (height, width, channels).
+        num_samples: Number of calibration samples to yield. If
+            ``image_dir`` has fewer images than this, the dataset cycles
+            through them (so the calibrator still sees ``num_samples``
+            batches).
+        image_dir: Optional directory of real calibration images.
+
+    Returns:
+        A generator function suitable for
+        ``tf.lite.TFLiteConverter.representative_dataset``.
     """
-    def generator():
-        for _ in range(num_samples):
-            data = np.random.random((1,) + input_shape).astype(np.float32)
-            yield [data]
-    return generator
+    if image_dir is None:
+        def random_generator():
+            for _ in range(num_samples):
+                data = np.random.random((1,) + input_shape).astype(np.float32)
+                yield [data]
+        return random_generator
+
+    image_paths = _list_images_in_dir(image_dir)
+
+    def dir_generator():
+        for i in range(num_samples):
+            path = image_paths[i % len(image_paths)]
+            batch = _load_and_preprocess_image(path, input_shape)
+            yield [batch]
+    return dir_generator
 
 
 def quantize_to_tflite(
     model: tf.keras.Model,
     input_shape: Tuple[int, int, int],
     calibration_samples: int = 100,
-    output_path: Optional[str] = None
+    output_path: Optional[str] = None,
+    calibration_data_dir: Optional[str] = None,
 ) -> Tuple[bytes, Dict[str, Any]]:
     """
     Convert Keras model to quantized TFLite with uint8 input/output.
-    
-    Uses representative dataset calibration for post-training quantization.
-    The resulting model will have uint8 inputs and outputs.
-    
+
+    Uses a representative dataset for post-training int8 calibration.
+    By default the representative data is random in [0, 1]; pass
+    ``calibration_data_dir`` to use a directory of real images instead
+    (resized + normalized to match the model's expected input).
+
     Args:
-        model: Keras model to quantize
-        input_shape: Input shape as (height, width, channels)
-        calibration_samples: Number of samples for quantization calibration
-        output_path: Optional path to save the TFLite model
-        
+        model: Keras model to quantize.
+        input_shape: Input shape as (height, width, channels).
+        calibration_samples: Number of calibration batches to feed.
+        output_path: Optional path to save the TFLite model.
+        calibration_data_dir: Optional directory of real images to use
+            as the representative dataset. If fewer images than
+            ``calibration_samples`` are present, the dataset cycles.
+
     Returns:
-        Tuple of (TFLite model bytes, quantization analysis dictionary)
+        Tuple of (TFLite model bytes, quantization analysis dictionary).
     """
     converter = tf.lite.TFLiteConverter.from_keras_model(model)
     converter.optimizations = [tf.lite.Optimize.DEFAULT]
     converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS]
     converter.inference_input_type = tf.uint8
     converter.inference_output_type = tf.uint8
-    
+
     representative_dataset = create_representative_dataset(
         input_shape,
-        calibration_samples
+        calibration_samples,
+        image_dir=calibration_data_dir,
     )
     converter.representative_dataset = representative_dataset
     
@@ -148,27 +216,36 @@ def convert_to_int8_tflite(
     model: tf.keras.Model,
     input_shape: Tuple[int, int, int],
     calibration_samples: int = 100,
-    output_path: Optional[str] = None
+    output_path: Optional[str] = None,
+    calibration_data_dir: Optional[str] = None,
 ) -> Tuple[bytes, Dict[str, Any]]:
     """
     Convert Keras model to int8 quantized TFLite.
-    
+
     Args:
-        model: Keras model to quantize
-        input_shape: Input shape for calibration
-        calibration_samples: Number of calibration samples
-        output_path: Optional path to save the TFLite model
-        
+        model: Keras model to quantize.
+        input_shape: Input shape for calibration.
+        calibration_samples: Number of calibration samples.
+        output_path: Optional path to save the TFLite model.
+        calibration_data_dir: Optional directory of real images used as
+            the representative dataset (passed through to
+            create_representative_dataset). Only meaningful for the
+            backbone or full-model calibration — head calibration
+            should stay random because the head consumes feature maps,
+            not images.
+
     Returns:
-        Tuple of (TFLite model bytes, analysis dictionary)
+        Tuple of (TFLite model bytes, analysis dictionary).
     """
     converter = tf.lite.TFLiteConverter.from_keras_model(model)
     converter.optimizations = [tf.lite.Optimize.DEFAULT]
     converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS]
     converter.inference_input_type = tf.uint8
     converter.inference_output_type = tf.uint8
-    
-    representative_dataset = create_representative_dataset(input_shape, calibration_samples)
+
+    representative_dataset = create_representative_dataset(
+        input_shape, calibration_samples, image_dir=calibration_data_dir,
+    )
     converter.representative_dataset = representative_dataset
     
     tflite_model = converter.convert()
@@ -248,25 +325,29 @@ def export_separate_tflite_models(
     base_name: str,
     backbone_format: str = "int8",
     head_format: str = "fp16",
-    calibration_samples: int = 100
+    calibration_samples: int = 100,
+    calibration_data_dir: Optional[str] = None,
 ) -> Dict[str, Dict[str, Any]]:
     """
     Export backbone and heads as separate TFLite files with different precisions.
-    
+
     Args:
-        architecture: Multi-head architecture with separable_weights=True
-        input_shape: Input shape for calibration (backbone only)
-        output_dir: Directory to save TFLite files
-        base_name: Base name for output files
-        backbone_format: Format for backbone ("int8", "fp16", "fp32")
-        head_format: Format for heads ("int8", "fp16", "fp32")
-        calibration_samples: Number of calibration samples for int8 conversion
-        
+        architecture: Multi-head architecture with separable_weights=True.
+        input_shape: Input shape for calibration (backbone only).
+        output_dir: Directory to save TFLite files.
+        base_name: Base name for output files.
+        backbone_format: Format for backbone ("int8", "fp16", "fp32").
+        head_format: Format for heads ("int8", "fp16", "fp32").
+        calibration_samples: Number of calibration samples for int8 conversion.
+        calibration_data_dir: Optional directory of real images. Used only
+            for the backbone's int8 calibration (heads consume feature
+            maps, not images, so their calibration stays random).
+
     Returns:
-        Dictionary with export results and file paths
-        
+        Dictionary with export results and file paths.
+
     Raises:
-        ValueError: If architecture doesn't have separable_weights enabled
+        ValueError: If architecture doesn't have separable_weights enabled.
     """
     if not architecture.is_separable:
         raise ValueError(
@@ -289,7 +370,8 @@ def export_separate_tflite_models(
     
     if backbone_format == "int8":
         _, backbone_analysis = convert_to_int8_tflite(
-            backbone_model, input_shape, calibration_samples, str(backbone_file)
+            backbone_model, input_shape, calibration_samples, str(backbone_file),
+            calibration_data_dir=calibration_data_dir,
         )
     elif backbone_format == "fp16":
         _, backbone_analysis = convert_to_fp16_tflite(
