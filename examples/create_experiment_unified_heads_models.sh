@@ -5,6 +5,8 @@
 # All models include unified_heads output for NPU compatibility
 # Note: Only creates multi-head models (single-head models skipped)
 
+set -e
+
 # Get script directory and project root
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -32,7 +34,7 @@ mkdir -p "$COPY_DIR"
 
 # Case 1: 96x96x1 -> 5,2,5,3,2 (96 resolution, 1 channel, 5 heads)
 echo "[1/7] Creating 96_1_5 (96x96x1 grayscale multi-head with unified output)..."
-python src/create_quantized_mobilenet_v3.py \
+python src/create_quantized_mobilenet.py \
     --alpha 0.25 \
     --input-shape "96x96x1" \
     --heads "5,2,5,3,2" \
@@ -50,7 +52,7 @@ fi
 # Case 2: 96x96x3 -> 5,2,5,3,2 (96 resolution, 3 channels, 5 heads)
 echo ""
 echo "[2/7] Creating 96_3_5 (96x96x3 RGB multi-head with unified output)..."
-python src/create_quantized_mobilenet_v3.py \
+python src/create_quantized_mobilenet.py \
     --alpha 0.25 \
     --input-shape "96x96x3" \
     --heads "5,2,5,3,2" \
@@ -68,7 +70,7 @@ fi
 # Case 3: 128x128x3 -> 5,2,5,3,2 (128 resolution, 3 channels, 5 heads)
 echo ""
 echo "[3/7] Creating 128_3_5 (128x128x3 RGB multi-head with unified output)..."
-python src/create_quantized_mobilenet_v3.py \
+python src/create_quantized_mobilenet.py \
     --alpha 0.25 \
     --input-shape "128x128x3" \
     --heads "5,2,5,3,2" \
@@ -86,7 +88,7 @@ fi
 # Case 4: 224x224x1 -> 5,2,5,3,2 (224 resolution, 3 channels, 5 heads)
 echo ""
 echo "[4/7] Creating 224_1_5 (224x224x1 RGB multi-head with unified output)..."
-python src/create_quantized_mobilenet_v3.py \
+python src/create_quantized_mobilenet.py \
     --alpha 0.25 \
     --input-shape "224x224x1" \
     --heads "5,2,5,3,2" \
@@ -104,7 +106,7 @@ fi
 # Case 5: 224x224x3 -> 5,2,5,3,2 (224 resolution, 3 channels, 5 heads)
 echo ""
 echo "[5/7] Creating 224_3_5 (224x224x3 RGB multi-head with unified output)..."
-python src/create_quantized_mobilenet_v3.py \
+python src/create_quantized_mobilenet.py \
     --alpha 0.25 \
     --input-shape "224x224x3" \
     --heads "5,2,5,3,2" \
@@ -122,7 +124,7 @@ fi
 # Case 6: 256x256x1 -> 5,2,5,3,2 (256 resolution, 3 channels, 5 heads)
 echo ""
 echo "[6/7] Creating 256_1_5 (256x256x3 RGB multi-head with unified output)..."
-python src/create_quantized_mobilenet_v3.py \
+python src/create_quantized_mobilenet.py \
     --alpha 0.25 \
     --input-shape "256x256x1" \
     --heads "5,2,5,3,2" \
@@ -140,7 +142,7 @@ fi
 # Case 7: 256x256x3 -> 5,2,5,3,2 (256 resolution, 3 channels, 5 heads)
 echo ""
 echo "[7/7] Creating 256_3_5 (256x256x3 RGB multi-head with unified output)..."
-python src/create_quantized_mobilenet_v3.py \
+python src/create_quantized_mobilenet.py \
     --alpha 0.25 \
     --input-shape "256x256x3" \
     --heads "5,2,5,3,2" \

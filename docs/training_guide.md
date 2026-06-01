@@ -21,6 +21,19 @@ from models.components.head_configuration import HeadConfiguration, create_head_
 from models.architectures.mobilenet_v3_qat_multi import MultiHeadMobileNetV3QATArchitecture
 ```
 
+For other MobileNet backbones, swap the import:
+
+```python
+# MobileNet V1 multi-head
+from models.architectures.mobilenet_v1_qat_multi import MultiHeadMobileNetV1QATArchitecture
+# MobileNet V2 multi-head
+from models.architectures.mobilenet_v2_qat_multi import MultiHeadMobileNetV2QATArchitecture
+# MobileNet V4 multi-head (custom UIB backbone, no ImageNet weights)
+from models.architectures.mobilenet_v4_qat_multi import MultiHeadMobileNetV4QATArchitecture
+```
+
+All four classes share the same `MultiHeadMobileNetArchitecture` base, so the rest of this guide (config creation, training loops, separable weights) applies unchanged regardless of which backbone you pick.
+
 ### Creating a Model Programmatically
 
 ```python
@@ -345,7 +358,7 @@ model.save('trained_model.keras')
 
 # 7. Quantize the trained model
 # After training, you can quantize the saved model:
-# python src/create_quantized_mobilenet_v3.py \
+# python src/create_quantized_mobilenet.py \
 #     --keras-model-path trained_model.keras \
 #     --output-dir ./quantized_models \
 #     --calibration-samples 200
@@ -447,6 +460,26 @@ new_model = architecture.add_head_dynamically(
     activation='linear',
     freeze_backbone=True  # Keep backbone frozen
 )
+```
+
+#### Adding a head at a different stride
+
+`add_head_dynamically()` accepts `tap_stride` to attach the new head at a higher-resolution intermediate backbone layer (useful when extending a classifier with a segmentation or keypoint head):
+
+```python
+# Add a head that reads stride-16 features, with backbone frozen
+new_model = architecture.add_head_dynamically(
+    num_classes=7,
+    head_name="segmentation_mask",
+    head_type='segmentation',     # use the segmentation builder
+    tap_stride=16,                # 1/16-resolution feature map
+    freeze_backbone=True,
+)
+```
+
+The new head receives the backbone feature map at the requested stride; existing heads (which may tap a different stride) are unaffected. See `examples/17_dynamic_head_addition.sh` for a runnable end-to-end demo.
+
+```python
 
 # Freeze existing heads
 architecture.freeze_head("object_class")

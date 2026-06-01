@@ -36,6 +36,21 @@ echo "Python version: $(python --version)"
 echo "TensorFlow version: $(python -c 'import tensorflow as tf; print(tf.__version__)' 2>/dev/null || echo 'Not installed')"
 echo ""
 
+# Run pytest unit + integration suite first. Abort the example-script
+# tests if pytest fails: a unit-level regression should surface ahead of
+# the slower example loop.
+echo "========================================="
+echo "Running pytest suite"
+echo "========================================="
+if ! python -m pytest 2>&1 | tee "$OUTPUT_DIR/pytest.log"; then
+    echo ""
+    echo "pytest failed; see $OUTPUT_DIR/pytest.log"
+    exit 1
+fi
+echo ""
+echo "pytest suite passed."
+echo ""
+
 # Find all numbered example scripts
 EXAMPLE_SCRIPTS=$(find examples -name "[0-9]*.sh" -type f | sort)
 

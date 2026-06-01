@@ -1,6 +1,6 @@
 # Python Environment Setup
 
-Guide for setting up the Python environment to use the Multi-Head MobileNet V3 quantization tool.
+Guide for setting up the Python environment to use the Multi-Head MobileNet quantization tool (supports MobileNet V1/V2/V3-Small/V4 backbones).
 
 ## Requirements
 
@@ -63,7 +63,7 @@ TensorFlow version: 2.20.0
 Once the environment is set up, you can use the tool:
 
 ```bash
-python src/create_quantized_mobilenet_v3.py \
+python src/create_quantized_mobilenet.py \
     --alpha 0.25 \
     --input-shape "128x128x1" \
     --heads "5,2,5,3,3" \

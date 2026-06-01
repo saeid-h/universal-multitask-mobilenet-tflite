@@ -368,6 +368,8 @@ arch = MultiHeadMobileNetV3QATArchitecture(config)
 model = arch.get_model()
 ```
 
+All head types in this reference work identically across the four MobileNet backbones — swap `MultiHeadMobileNetV3QATArchitecture` for `MultiHeadMobileNetV{1,2,4}QATArchitecture` to use V1, V2, or V4 instead.
+
 ### Complete Face Analysis Example
 
 ```python
@@ -503,6 +505,22 @@ head = HeadConfiguration(
 4. **Data format**: Ensure your training data matches the expected format for each head type
 5. **Balanced learning**: Consider loss weights when combining different head types
 6. **Regularization**: Adjust dropout rates based on head complexity and data size
+
+## Recommended `tap_stride` per head type
+
+Each `HeadConfiguration` can declare a `tap_stride` to read from an earlier (higher-resolution) backbone layer instead of the final feature map. See [Architecture → Feature taps](architecture.md#feature-taps-single-tap) for the mechanism. Recommended defaults by head type:
+
+| Head type | Recommended `tap_stride` | Why |
+|---|---|---|
+| `standard`, `multilabel`, `ordinal` | `None` (default = final) | These collapse spatial dims via GAP. Earlier taps waste compute. |
+| `regression`, `embedding` | `None` | Same — final feature map is plenty. |
+| `segmentation` | `8` or `16` | Dense prediction needs spatial resolution. Stride 8 = highest fidelity, stride 16 = cheaper. |
+| `keypoint_detection` | `8` | Keypoint heatmaps benefit from fine spatial precision. |
+| `ssd_detection` | `16` | SSD's standard pattern; stride 8 helps for small objects but doubles cost. |
+| `yolo_detection` | `16` (single-scale) | A real multi-scale YOLO would want FPN, not supported in single-tap. |
+| `text_detection`, `text_recognition`, `scene_text` | `8` or `16` | Text geometry needs high spatial resolution; `16` is a reasonable starting point. |
+
+These are starting points, not constraints — measure on your data.
 
 ## Performance Considerations
 

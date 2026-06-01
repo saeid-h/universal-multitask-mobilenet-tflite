@@ -2,13 +2,16 @@
 # Example 6: Using Pretrained ImageNet Weights
 # Demonstrates transfer learning with pretrained weights
 
+set -e
+cd "$(dirname "$0")"
+
 echo "========================================="
 echo "Example 6: Pretrained ImageNet Weights"
 echo "========================================="
 echo "Creating model with pretrained weights..."
 echo ""
 
-python ../src/create_quantized_mobilenet_v3.py \
+python ../src/create_quantized_mobilenet.py \
     --alpha 0.75 \
     --input-shape "224x224x3" \
     --heads "100,20" \

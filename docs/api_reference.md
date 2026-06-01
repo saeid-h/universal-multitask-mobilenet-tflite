@@ -14,16 +14,21 @@ Either `--heads` (for new models) or `--keras-model-path` (for trained models) m
 
 Comma-separated list of class counts per head. Required when creating a new model.
 
-**Format**: `"num1,num2,num3,..."`
+**Format**: `"num1,num2,num3,..."` or `"num1@stride1,num2@stride2,..."`
 
-**Example**: `--heads "5,2,3"` creates three heads with 5, 2, and 3 classes respectively.
+Each entry is either a bare class count (head uses the default tap = final backbone feature map) or a class count with an `@STRIDE` suffix that routes that head to the backbone feature map at the given stride.
+
+**Examples**:
+- `--heads "5,2,3"` — three heads, all reading the final feature map (stride 32).
+- `--heads "5@32,2@16,3@8"` — three heads tapping different backbone scales. See [Architecture → Feature taps](architecture.md#feature-taps-single-tap) for the per-backbone stride table.
 
 **Requirements**:
 - At least one head must be specified
 - Each head must have at least 1 class
 - Values must be positive integers
+- `@STRIDE` must be a stride exposed by the chosen backbone (currently 4, 8, 16, or 32 for all four backbones); an unsupported stride raises a clear error.
 
-**Note**: The CLI creates standard classification heads. For other head types (multilabel, regression, embedding, ordinal), use the Python API. See [Head Types Reference](head_types_reference.md) for details.
+**Note**: The CLI creates standard classification heads. For other head types (multilabel, regression, embedding, ordinal, segmentation, etc.), use the Python API. See [Head Types Reference](head_types_reference.md) for details.
 - Ignored when `--keras-model-path` is provided
 
 ##### `--keras-model-path`
@@ -52,19 +57,46 @@ The directory will be created if it doesn't exist.
 
 ### Optional Arguments
 
+#### `--backbone`
+
+MobileNet backbone version to use.
+
+**Options**: `v1`, `v2`, `v3`, `v4`
+
+**Default**: `v3` (which preserves the tool's original V3-Small-only behavior)
+
+**Behavior**:
+- `v1` → `tf.keras.applications.MobileNet`
+- `v2` → `tf.keras.applications.MobileNetV2`
+- `v3` → `tf.keras.applications.MobileNetV3Small`
+- `v4` → project's custom `MobileNetV4ConvS` (no Keras-applications entry exists for V4)
+
+Output filenames are auto-prefixed with the backbone version: `mnv1_*`, `mnv2_*`, `mnv3_*`, `mnv4_*`. Per-version alpha validation runs inside each architecture's `validate_config()`; see `--alpha` below for the valid set per backbone.
+
 #### `--alpha`
 
 Width multiplier controlling model size and capacity.
 
-**Options**: `0.25`, `0.50`, `0.75`, `1.0`
-
 **Default**: `0.25`
 
-**Guidelines**:
+**Valid set per backbone**:
+
+| Backbone | Valid alphas |
+|---|---|
+| `v1` | 0.25, 0.50, 0.75, 1.0 |
+| `v2` | 0.35, 0.50, 0.75, 1.0, 1.3, 1.4 |
+| `v3` | 0.25, 0.50, 0.75, 1.0 |
+| `v4` | 0.25, 0.50, 0.75, 1.0 (interpreted as width multiplier on MobileNetV4-Conv-S) |
+
+Passing an alpha not in the chosen backbone's valid set raises a `ValueError` with a clear per-version message. The CLI itself does not restrict alpha to enable per-version validation.
+
+**Guidelines for V3 (default backbone)**:
 - 0.25: Smallest model (~100KB quantized), fastest inference
 - 0.50: Medium model (~400KB quantized)
 - 0.75: Larger model (~900KB quantized), supports pretrained weights
 - 1.0: Largest model (~1.5MB quantized), supports pretrained weights
+
+See [Architecture](architecture.md#model-size) for full per-backbone parameter ranges.
 
 #### `--input-shape`
 
@@ -112,16 +144,26 @@ Output files will be:
 
 #### `--use-pretrained`
 
-Use ImageNet pretrained weights for the backbone.
+Use ImageNet pretrained weights for the backbone (where supported).
 
 **Default**: Not used (False)
 
-**Requirements**:
-- Only works with alpha 0.75 or 1.0
-- Requires RGB input (3 channels)
-- Backbone will be frozen (non-trainable)
+**Pretrained-weight availability by backbone**:
 
-**Example**: `--alpha 0.75 --use-pretrained`
+| Backbone | Pretrained support |
+|---|---|
+| `v1` | All alphas, RGB only |
+| `v2` | All alphas, RGB only |
+| `v3` | Alpha 0.75 or 1.0 only, RGB only (Keras MobileNetV3 limitation) |
+| `v4` | Not supported (no pretrained weights bundled with the custom V4 implementation) |
+
+**Common requirements**:
+- Requires RGB input (3 channels). The flag is silently treated as `False` for grayscale inputs.
+- When applied, the backbone is frozen (`trainable=False`) so only the heads train.
+
+Each architecture enforces its own rules in `validate_config()`. Passing `--use-pretrained` with an unsupported combination raises a `ValueError` describing the constraint.
+
+**Example**: `--backbone v3 --alpha 0.75 --use-pretrained --input-shape 224x224x3`
 
 #### `--calibration-samples`
 
@@ -176,6 +218,22 @@ Add a unified concatenated output for multi-head models.
 - Unified output: `unified_heads` (10 classes total, concatenated in order)
 
 **Note**: The head order in unified output matches the order specified in `--heads` argument. This order is documented in the model report.
+
+**Incompatibility with feature taps**: `--unified-output` cannot be combined with heads that use a `@STRIDE < 32` in `--heads`. The unified output concatenates 1D head outputs; spatial heads (which produce 4D feature maps) break that contract. Drop `--unified-output` or move the spatial heads back to the default tap.
+
+#### `--fusion` / `--fpn-channels`
+
+Cross-scale feature fusion mode.
+
+**`--fusion` options**:
+- `none` (default): single-tap. Each head reads its `tap_stride` feature map directly from the backbone. No extra learnable layers between backbone and heads.
+- `fpn`: top-down feature pyramid network. Lateral 1×1 conv at every stride a head uses, plus an upsample-and-add pathway from coarsest to finest. Each head consumes the FPN level instead of the raw backbone stride. See [Architecture → FPN fusion](architecture.md#fpn-fusion-opt-in).
+
+**`--fpn-channels`**: integer channel count for every FPN level. Default `128`. Lower it (32–64) for MCU-class deployment.
+
+**Example**: `--heads "5@32,2@16,3@8" --fusion fpn --fpn-channels 64`
+
+**When to use FPN**: small-object detection or fine segmentation where the higher-resolution feature maps benefit from semantic content pushed down from the coarser layers. For pure classification or where the freeze-backbone-and-add-a-head workflow matters more, stay with `--fusion none`.
 
 #### `--separable-weights`
 
@@ -310,7 +368,7 @@ The script supports two modes:
 Create a new model from scratch and quantize it:
 
 ```bash
-python src/create_quantized_mobilenet_v3.py \
+python src/create_quantized_mobilenet.py \
     --heads "5,2,3" \
     --output-dir ./models
 ```
@@ -320,7 +378,7 @@ python src/create_quantized_mobilenet_v3.py \
 Load an existing trained model and quantize it:
 
 ```bash
-python src/create_quantized_mobilenet_v3.py \
+python src/create_quantized_mobilenet.py \
     --keras-model-path ./trained_model.keras \
     --output-dir ./models
 ```

@@ -1,15 +1,18 @@
 # Quick Create: 128x128 Grayscale Multi-Head Model
 
-To create the model with heads [5, 2, 5, 3, 3]:
+To create the model with heads [5, 2, 5, 3, 3] on the default V3 backbone:
 
 ```bash
-python src/create_quantized_mobilenet_v3.py \
+python src/create_quantized_mobilenet.py \
+    --backbone v3 \
     --alpha 0.25 \
     --input-shape "128x128x1" \
     --heads "5,2,5,3,3" \
     --output-dir ./output \
     --output-name "mnv3_128x128_grayscale_5_2_5_3_3"
 ```
+
+Swap `--backbone v3` for `v1`, `v2`, or `v4` to build the same heads on a different MobileNet backbone (output filenames will be auto-prefixed accordingly).
 
 Or use the convenience script:
 ```bash

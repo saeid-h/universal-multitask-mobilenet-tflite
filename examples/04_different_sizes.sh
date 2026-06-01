@@ -2,6 +2,9 @@
 # Example 4: Different Model Sizes (Alpha Values)
 # Demonstrates the size/accuracy trade-off with different alpha values
 
+set -e
+cd "$(dirname "$0")"
+
 echo "========================================="
 echo "Example 4: Different Model Sizes (Alpha Values)"
 echo "========================================="
@@ -18,7 +21,7 @@ for i in "${!ALPHAS[@]}"; do
     echo ""
     echo "[$((i+1))/3] Creating alpha $ALPHA model ($NAME)..."
     
-    python ../src/create_quantized_mobilenet_v3.py \
+    python ../src/create_quantized_mobilenet.py \
         --alpha "$ALPHA" \
         --input-shape "224x224x3" \
         --heads "10" \

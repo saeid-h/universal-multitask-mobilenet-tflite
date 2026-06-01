@@ -2,13 +2,16 @@
 # Example 2: Multi-Head Model with Named Heads
 # Demonstrates a model that performs multiple tasks simultaneously
 
+set -e
+cd "$(dirname "$0")"
+
 echo "========================================="
 echo "Example 2: Multi-Head Model with Named Heads"
 echo "========================================="
 echo "Creating a multi-task model..."
 echo ""
 
-python ../src/create_quantized_mobilenet_v3.py \
+python ../src/create_quantized_mobilenet.py \
     --alpha 0.25 \
     --input-shape "224x224x3" \
     --heads "5,2,3" \

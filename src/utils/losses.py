@@ -62,7 +62,11 @@ def get_loss_for_head_type(head_type: str, from_logits: bool = True, **kwargs) -
         return SSDLoss(**kwargs)
     
     elif head_type == "yolo_detection":
-        # YOLO uses combined objectness + classification + localization loss
+        # YOLO loss requires num_classes (set of class logits per box). Default
+        # to 1 (single-class detection) for backward compatibility; callers
+        # with multi-class detection should pass num_classes via the
+        # get_losses_for_heads loss_overrides dict.
+        kwargs.setdefault('num_classes', 1)
         return YOLOLoss(**kwargs)
     
     elif head_type == "segmentation":
@@ -352,119 +356,200 @@ class SSDLoss(tf.keras.losses.Loss):
 
 
 class YOLOLoss(tf.keras.losses.Loss):
-    """YOLO detection loss (objectness + classification + localization).
-    
-    Computes the YOLO loss combining objectness confidence, 
-    class probabilities, and bounding box coordinates.
+    """YOLO detection loss (localization + objectness + classification).
+
+    Predictions and targets share the layout
+    ``(batch, grid_h, grid_w, num_boxes * (5 + num_classes))`` where the
+    last 5+num_classes channels per box are
+    ``[tx, ty, tw, th, objectness, cls_0, cls_1, ...]``. The 5 box+obj
+    channels are interpreted as logits (sigmoid applied internally); the
+    class channels are softmax logits.
+
+    Loss components, summed:
+      * Localization: lambda_coord * (sigmoid(t_xy) MSE + t_wh MSE)
+        — applied only at cells containing an object (objectness > 0.5
+        in the target).
+      * Objectness: BCE-with-logits. Weighted by lambda_noobj for cells
+        without an object so background grids don't dominate the loss.
+      * Classification: categorical cross-entropy across class logits,
+        applied only at cells containing an object.
+
+    This matches the standard YOLOv2/v3 loss formulation and supports
+    arbitrary ``num_classes`` (the previous implementation hard-coded
+    ``num_classes=1`` via incorrect striding).
     """
-    
-    def __init__(self, lambda_coord: float = 5.0, lambda_noobj: float = 0.5,
-                 name: str = "yolo_loss", **kwargs):
+
+    def __init__(
+        self,
+        num_classes: int,
+        num_boxes: int = 1,
+        lambda_coord: float = 5.0,
+        lambda_noobj: float = 0.5,
+        name: str = "yolo_loss",
+        **kwargs,
+    ):
         super().__init__(name=name, **kwargs)
-        self.lambda_coord = lambda_coord  # Weight for coordinate loss
-        self.lambda_noobj = lambda_noobj  # Weight for no-object loss
-    
+        if num_classes < 1:
+            raise ValueError(f"num_classes must be >= 1, got {num_classes}")
+        if num_boxes < 1:
+            raise ValueError(f"num_boxes must be >= 1, got {num_boxes}")
+        self.num_classes = num_classes
+        self.num_boxes = num_boxes
+        self.lambda_coord = lambda_coord
+        self.lambda_noobj = lambda_noobj
+
     def call(self, y_true, y_pred):
-        """Compute YOLO loss.
-        
-        Args:
-            y_true: Ground truth tensor [batch, grid_h, grid_w, num_boxes * (5 + num_classes)]
-            y_pred: Predicted tensor [batch, grid_h, grid_w, num_boxes * (5 + num_classes)]
-            
-        Returns:
-            YOLO loss scalar
-        """
-        # This is a simplified version - full YOLO loss is more complex
-        # For production, use tf.keras.losses.binary_crossentropy for components
-        
-        # Split predictions into components
-        # Format: [x, y, w, h, objectness, class1, class2, ...]
-        
-        # Objectness loss (binary crossentropy)
-        obj_loss = tf.keras.losses.binary_crossentropy(
-            y_true[..., 4::5+1], y_pred[..., 4::5+1], from_logits=True  # Simplified indexing
+        """Compute YOLO loss; both inputs share shape
+        ``(B, H, W, num_boxes * (5 + num_classes))``."""
+        per_box = 5 + self.num_classes
+        # Reshape to (B, H, W, num_boxes, 5+num_classes) for clean slicing.
+        target_shape = tf.concat(
+            [tf.shape(y_true)[:-1], [self.num_boxes, per_box]], axis=0
         )
-        
-        # Coordinate loss (MSE for present objects)
-        coord_loss = tf.keras.losses.mse(y_true[..., :4], y_pred[..., :4])
-        
-        # Class loss (categorical crossentropy for present objects)
-        class_loss = tf.keras.losses.sparse_categorical_crossentropy(
-            y_true[..., 5:], y_pred[..., 5:], from_logits=True
+        yt = tf.reshape(y_true, target_shape)
+        yp = tf.reshape(y_pred, target_shape)
+
+        # Slices.
+        t_xy = yt[..., 0:2]
+        t_wh = yt[..., 2:4]
+        t_obj = yt[..., 4:5]
+        t_cls = yt[..., 5:]
+
+        p_xy_logits = yp[..., 0:2]
+        p_wh = yp[..., 2:4]
+        p_obj_logits = yp[..., 4:5]
+        p_cls_logits = yp[..., 5:]
+
+        # Mask of cells containing an object (objectness target > 0.5).
+        obj_mask = tf.cast(t_obj > 0.5, tf.float32)
+        noobj_mask = 1.0 - obj_mask
+
+        # --- Localization: only at cells with an object.
+        xy_loss = tf.reduce_sum(
+            obj_mask * tf.square(t_xy - tf.sigmoid(p_xy_logits)), axis=-1, keepdims=True
         )
-        
-        # Combine losses (simplified weighting)
-        total_loss = (self.lambda_coord * coord_loss + 
-                     obj_loss + 
-                     class_loss)
-        
-        return tf.reduce_mean(total_loss)
-    
+        wh_loss = tf.reduce_sum(
+            obj_mask * tf.square(t_wh - p_wh), axis=-1, keepdims=True
+        )
+        coord_loss = xy_loss + wh_loss
+
+        # --- Objectness: BCE-with-logits, weighted by lambda_noobj on bg.
+        obj_bce = tf.nn.sigmoid_cross_entropy_with_logits(
+            labels=t_obj, logits=p_obj_logits
+        )
+        obj_loss = obj_mask * obj_bce + self.lambda_noobj * noobj_mask * obj_bce
+
+        # --- Classification: only at cells with an object.
+        # t_cls is a one-hot (or soft) label distribution.
+        cls_ce = tf.nn.softmax_cross_entropy_with_logits(
+            labels=t_cls, logits=p_cls_logits
+        )
+        # cls_ce shape: (..., num_boxes); add a trailing dim to align.
+        cls_ce = tf.expand_dims(cls_ce, axis=-1)
+        cls_loss = obj_mask * cls_ce
+
+        total = self.lambda_coord * coord_loss + obj_loss + cls_loss
+        # Reduce over spatial + box + channel dims, mean over batch.
+        return tf.reduce_mean(tf.reduce_sum(total, axis=[1, 2, 3, 4]))
+
     def get_config(self):
         config = super().get_config()
         config.update({
+            'num_classes': self.num_classes,
+            'num_boxes': self.num_boxes,
             'lambda_coord': self.lambda_coord,
-            'lambda_noobj': self.lambda_noobj
+            'lambda_noobj': self.lambda_noobj,
         })
         return config
 
 
 class TextDetectionLoss(tf.keras.losses.Loss):
-    """Combined loss for text detection (classification + geometry regression).
-    
-    Combines binary crossentropy for text/no-text classification with
-    regression losses for text bounding boxes and optional orientation.
+    """Combined loss for text detection (score + box geometry + optional angle).
+
+    Accepts inputs either as dicts (programmatic API; keys
+    ``text_scores`` / ``text_boxes`` / optional ``text_angles``) or as a
+    single concatenated tensor of shape
+    ``(B, H, W, 5)`` for ``[score, dx, dy, dw, dh]`` or ``(B, H, W, 6)``
+    for ``[score, dx, dy, dw, dh, angle]``. The single-tensor form is
+    what a Keras-compiled model passes when the head is set up as a
+    single concatenated output (the typical loss-coupling shape).
+
+    Components:
+      * Score: BCE on the per-pixel text/no-text score (sigmoid).
+      * Geometry: smooth-L1 (Huber) on the 4 box channels, averaged
+        only over positive (text) pixels.
+      * Angle (optional, if present): MSE on the angle channel,
+        averaged over positive pixels.
     """
-    
-    def __init__(self, geometry_weight: float = 1.0, angle_weight: float = 0.1,
-                 name: str = "text_detection_loss", **kwargs):
+
+    def __init__(
+        self,
+        geometry_weight: float = 1.0,
+        angle_weight: float = 0.1,
+        score_threshold: float = 0.5,
+        name: str = "text_detection_loss",
+        **kwargs,
+    ):
         super().__init__(name=name, **kwargs)
         self.geometry_weight = geometry_weight
         self.angle_weight = angle_weight
-    
-    def call(self, y_true, y_pred):
-        """Compute text detection loss.
-        
-        Args:
-            y_true: Dictionary with 'text_scores', 'text_boxes', and optionally 'text_angles'
-            y_pred: Dictionary with same structure as y_true
-            
-        Returns:
-            Combined text detection loss
+        self.score_threshold = score_threshold
+
+    @staticmethod
+    def _slice(y, default_with_angle: bool):
+        """Normalize y to (score, boxes, angle_or_None).
+
+        Accepts a dict with the expected keys, or a tensor whose last
+        dim is 5 (no angle) or 6 (with angle).
         """
-        # Text classification loss
-        text_cls_loss = tf.keras.losses.binary_crossentropy(
-            y_true['text_scores'], y_pred['text_scores'], from_logits=False
+        if isinstance(y, dict):
+            return y['text_scores'], y['text_boxes'], y.get('text_angles')
+        # Tensor path. Slice channels.
+        score = y[..., 0:1]
+        boxes = y[..., 1:5]
+        last_dim = y.shape[-1]
+        angle = y[..., 5:6] if (last_dim is not None and last_dim >= 6) else None
+        return score, boxes, angle
+
+    def call(self, y_true, y_pred):
+        t_score, t_boxes, t_angle = self._slice(y_true, default_with_angle=False)
+        p_score, p_boxes, p_angle = self._slice(y_pred, default_with_angle=False)
+
+        # Score loss (BCE). Predictions are expected post-sigmoid in [0, 1].
+        score_loss = tf.keras.losses.binary_crossentropy(
+            t_score, p_score, from_logits=False,
         )
-        
-        # Text geometry regression loss (only for positive text regions)
-        text_mask = tf.cast(y_true['text_scores'] > 0.5, tf.float32)
-        
-        # Smooth L1 loss for bounding boxes
-        box_diff = y_pred['text_boxes'] - y_true['text_boxes']
+
+        # Positive-pixel mask for geometry / angle losses.
+        text_mask = tf.cast(t_score > self.score_threshold, tf.float32)
+        positive = tf.reduce_sum(text_mask) + 1e-8
+
+        # Smooth L1 (Huber, delta=1) for box geometry.
+        box_diff = p_boxes - t_boxes
         abs_diff = tf.abs(box_diff)
         smooth_l1 = tf.where(
             abs_diff < 1.0,
             0.5 * tf.square(box_diff),
-            abs_diff - 0.5
+            abs_diff - 0.5,
         )
-        geometry_loss = tf.reduce_sum(smooth_l1 * tf.expand_dims(text_mask, -1)) / (tf.reduce_sum(text_mask) + 1e-8)
-        
-        total_loss = text_cls_loss + self.geometry_weight * geometry_loss
-        
-        # Optional angle loss
-        if 'text_angles' in y_pred:
-            angle_diff = y_pred['text_angles'] - y_true['text_angles']
-            angle_loss = tf.reduce_sum(tf.square(angle_diff) * text_mask) / (tf.reduce_sum(text_mask) + 1e-8)
-            total_loss += self.angle_weight * angle_loss
-        
-        return tf.reduce_mean(total_loss)
-    
+        # Broadcast the (B,H,W,1) mask over the 4 box channels.
+        geometry_loss = tf.reduce_sum(smooth_l1 * text_mask) / positive
+
+        total = tf.reduce_mean(score_loss) + self.geometry_weight * geometry_loss
+
+        if p_angle is not None and t_angle is not None:
+            angle_diff = p_angle - t_angle
+            angle_loss = tf.reduce_sum(tf.square(angle_diff) * text_mask) / positive
+            total = total + self.angle_weight * angle_loss
+
+        return total
+
     def get_config(self):
         config = super().get_config()
         config.update({
             'geometry_weight': self.geometry_weight,
-            'angle_weight': self.angle_weight
+            'angle_weight': self.angle_weight,
+            'score_threshold': self.score_threshold,
         })
         return config
 

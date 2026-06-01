@@ -17,6 +17,8 @@ import tensorflow as tf
 from tensorflow.keras.applications import MobileNetV3Small
 from tensorflow.keras import layers, Model
 
+from ._keras_app_taps import features_by_stride_from_keras_model
+
 from ..base import MobileNetArchitecture
 from ..factory import ModelArchitectureFactory
 from .multi_head_base import MultiHeadMobileNetArchitecture
@@ -118,11 +120,11 @@ class MultiHeadMobileNetV3QATArchitecture(MultiHeadMobileNetArchitecture):
         use_pretrained = self.config.arch_params.get('use_pretrained', True)
         input_shape = self.config.input_shape
         height, width, channels = input_shape
-        
+
         # Check if we can use ImageNet weights (only for RGB inputs)
         can_use_imagenet = use_pretrained and channels == 3
         weights = 'imagenet' if can_use_imagenet else None
-        
+
         # Create MobileNetV3 backbone
         backbone = MobileNetV3Small(
             input_shape=input_shape,
@@ -131,12 +133,25 @@ class MultiHeadMobileNetV3QATArchitecture(MultiHeadMobileNetArchitecture):
             alpha=alpha,
             pooling=None
         )
-        
+
         # Freeze backbone if using ImageNet weights
         if can_use_imagenet:
             backbone.trainable = False
-        
+
         return backbone
+
+    def _features_by_stride(
+        self,
+        backbone: tf.keras.Model,
+        input_tensor: tf.Tensor,
+        backbone_output: tf.Tensor,
+    ) -> Dict[int, tf.Tensor]:
+        """Expose stride-4/8/16/32 feature maps from MobileNetV3Small."""
+        return features_by_stride_from_keras_model(
+            backbone,
+            input_tensor,
+            self.config.input_shape,
+        )
 
 
 # Factory functions for creating multi-head MobileNetV3 QAT configurations

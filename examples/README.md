@@ -1,6 +1,6 @@
 # Example Scripts
 
-This directory contains example scripts demonstrating various capabilities of the Multi-Head MobileNet V3 quantization tool.
+This directory contains example scripts demonstrating various capabilities of the Multi-Head MobileNet quantization tool. Scripts 01–12 use the default V3 backbone; scripts 13–15 demonstrate the other MobileNet versions via `--backbone v1/v2/v4`.
 
 ## Quick Start
 
@@ -65,6 +65,42 @@ Runs multiple examples to showcase project capabilities.
 - **Creates**: 5 different model types
 - **Shows**: Full range of capabilities
 - **Purpose**: Quick overview of all features
+
+### 10–12 (additional V3 examples)
+- `10_create_128x128_model.sh` — 128×128 grayscale, [5,2,5,3,3] heads.
+- `11_separate_tflite_export.sh` — separable weights, mixed-precision per-component export.
+- `12_alternative_heads.sh` — non-classification head types (multilabel, regression, embedding, ordinal) via the Python API.
+
+### 13_backbone_v1.sh
+Demonstrates `--backbone v1` (MobileNetV1).
+- **Backbone**: `tf.keras.applications.MobileNet`, alpha 0.25
+- **Heads**: 3 heads (5, 2, 3 classes)
+- **Verifier**: Calls `_verify_tflite.py` to assert 3 output tensors and uint8 input.
+
+### 14_backbone_v2.sh
+Demonstrates `--backbone v2` (MobileNetV2) with a V2-only alpha.
+- **Backbone**: `tf.keras.applications.MobileNetV2`, alpha **0.35** (rejected by V1/V3/V4)
+- **Heads**: 3 heads — proves per-version alpha validation works.
+
+### 15_backbone_v4.sh
+Demonstrates `--backbone v4` (MobileNetV4-Conv-S, custom UIB-based).
+- **Backbone**: project's custom V4 (no Keras-applications V4 exists)
+- **Heads**: 3 heads, no pretrained weights.
+
+### 16_feature_taps.sh
+Demonstrates per-head feature taps via the `--heads "N@stride"` CLI syntax.
+- **Backbone**: V3, alpha 0.25
+- **Heads**: `5@32,2@16,3@8` — three heads tapping different backbone scales.
+- **Use case**: Mixing classification (final feature map) with spatial-task heads (earlier, higher-resolution layers).
+
+### 17_dynamic_head_addition.sh
+Demonstrates adding a head to a trained model with the backbone frozen.
+- Builds a 3-head model on V3 (all at stride 32).
+- Calls `add_head_dynamically(tap_stride=16, freeze_backbone=True)` to attach a 4th head reading higher-resolution features.
+- **Use case**: Shipping a head increment onto an already-trained multi-head model without retraining existing heads.
+
+### _verify_tflite.py
+Internal helper used by the backbone-specific examples. Loads a `.tflite` file and asserts the output-tensor count matches `--expected-heads` and the input dtype is `uint8`. Exits non-zero on mismatch.
 
 ### create_experiment_models.sh
 Creates all experimental models with standardized naming format.

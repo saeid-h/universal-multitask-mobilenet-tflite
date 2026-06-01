@@ -1,13 +1,13 @@
 # Tutorial
 
-This tutorial walks you through creating quantized MobileNet V3 models with different configurations.
+This tutorial walks you through creating quantized MobileNet models with different configurations. By default the tool uses the V3-Small backbone — pass `--backbone v1`, `v2`, or `v4` to use a different MobileNet version.
 
 ## Step 1: Basic Single-Head Model
 
 Start with a simple model that has one classification head:
 
 ```bash
-python src/create_quantized_mobilenet_v3.py \
+python src/create_quantized_mobilenet.py \
     --heads "2" \
     --output-dir ./tutorial_output
 ```
@@ -24,7 +24,7 @@ The model will be saved as a TFLite file ready for deployment.
 Now create a model with multiple heads. This is useful when you need to predict multiple things from the same image:
 
 ```bash
-python src/create_quantized_mobilenet_v3.py \
+python src/create_quantized_mobilenet.py \
     --heads "5,2,3" \
     --head-names "object_class,person_detection,age_group" \
     --output-dir ./tutorial_output
@@ -35,14 +35,14 @@ This creates three heads:
 - Second head: 2 classes (person detection)
 - Third head: 3 classes (age group)
 
-All heads share the same MobileNet V3 backbone, making the model efficient.
+All heads share the same MobileNet backbone (V3-Small by default), making the model efficient.
 
 ## Step 3: Custom Input Shape
 
 You can change the input resolution and channels. For grayscale images:
 
 ```bash
-python src/create_quantized_mobilenet_v3.py \
+python src/create_quantized_mobilenet.py \
     --input-shape "96x96x1" \
     --heads "2" \
     --output-dir ./tutorial_output
@@ -51,7 +51,7 @@ python src/create_quantized_mobilenet_v3.py \
 For smaller RGB images:
 
 ```bash
-python src/create_quantized_mobilenet_v3.py \
+python src/create_quantized_mobilenet.py \
     --input-shape "128x128x3" \
     --heads "5,2" \
     --output-dir ./tutorial_output
@@ -64,7 +64,7 @@ Smaller input sizes create smaller models and faster inference, but may reduce a
 If you want to use ImageNet pretrained weights (only available for alpha 0.75 or 1.0):
 
 ```bash
-python src/create_quantized_mobilenet_v3.py \
+python src/create_quantized_mobilenet.py \
     --alpha 0.75 \
     --heads "100,10" \
     --use-pretrained \
@@ -78,7 +78,7 @@ Pretrained weights can improve accuracy but create larger models. Alpha 0.25 and
 For NPUs that don't support multiple output tensors, you can create models with a unified concatenated output:
 
 ```bash
-python src/create_quantized_mobilenet_v3.py \
+python src/create_quantized_mobilenet.py \
     --heads "5,2,3" \
     --head-names "object_class,person_detection,age_group" \
     --unified-output \
@@ -104,13 +104,13 @@ Choose the alpha parameter based on your needs:
 
 ```bash
 # Small model
-python src/create_quantized_mobilenet_v3.py \
+python src/create_quantized_mobilenet.py \
     --alpha 0.25 \
     --heads "2" \
     --output-dir ./tutorial_output/small
 
 # Larger model
-python src/create_quantized_mobilenet_v3.py \
+python src/create_quantized_mobilenet.py \
     --alpha 0.5 \
     --heads "2" \
     --output-dir ./tutorial_output/large
@@ -121,7 +121,7 @@ python src/create_quantized_mobilenet_v3.py \
 The quantization process uses a representative dataset for calibration. You can control how many samples are used:
 
 ```bash
-python src/create_quantized_mobilenet_v3.py \
+python src/create_quantized_mobilenet.py \
     --heads "5,2" \
     --calibration-samples 200 \
     --output-dir ./tutorial_output
@@ -134,7 +134,7 @@ More samples can improve quantization quality but take longer. The default of 10
 By default, the script saves the Keras model (.keras file) as well as the quantized TFLite model. To skip the Keras model:
 
 ```bash
-python src/create_quantized_mobilenet_v3.py \
+python src/create_quantized_mobilenet.py \
     --heads "2" \
     --no-save-keras \
     --output-dir ./tutorial_output
@@ -156,7 +156,7 @@ Open the `*_summary.txt` file to see all model details. The `*_report.json` file
 If you've already trained a model and want to quantize it:
 
 ```bash
-python src/create_quantized_mobilenet_v3.py \
+python src/create_quantized_mobilenet.py \
     --keras-model-path ./my_trained_model.keras \
     --output-dir ./quantized_models
 ```

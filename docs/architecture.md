@@ -1,19 +1,21 @@
 # Architecture
 
-How multi-head MobileNet V3 models work and what makes them efficient.
+How multi-head MobileNet models work and what makes them efficient.
 
 ## Overview
 
-Multi-head MobileNet V3 uses a shared backbone (feature extractor) with multiple classification heads. The backbone processes the input image once, and each head makes predictions based on the same features.
+The multi-head MobileNet pipeline uses a shared backbone (feature extractor) with multiple task heads. The backbone processes the input image once, and each head makes predictions based on the same features.
 
-## Backbone: MobileNet V3
+## Backbone: MobileNet V1 / V2 / V3-Small / V4
 
-The backbone is a MobileNet V3 Small architecture, which is optimized for mobile and edge devices. Key features:
+The backbone is one of four MobileNet variants, selected via `--backbone {v1,v2,v3,v4}` (default `v3`). Each is optimized for mobile and edge devices, and all share a common pattern: depthwise-separable or universal-inverted-bottleneck blocks, mobile-friendly activations, and a width multiplier (`alpha`) that controls model capacity.
 
-- Depthwise separable convolutions reduce computation
-- Squeeze-and-Excitation blocks improve feature quality
-- Hard-swish activations for efficiency
-- Width multiplier (alpha) controls model capacity
+| Backbone | Source | Alphas | ImageNet pretrained | Notes |
+|---|---|---|---|---|
+| `v1` | `tf.keras.applications.MobileNet` | 0.25, 0.5, 0.75, 1.0 | Yes (RGB) | Depthwise-separable convs only. |
+| `v2` | `tf.keras.applications.MobileNetV2` | 0.35, 0.5, 0.75, 1.0, 1.3, 1.4 | Yes (RGB) | Inverted residuals + linear bottlenecks. |
+| `v3` | `tf.keras.applications.MobileNetV3Small` | 0.25, 0.5, 0.75, 1.0 | Yes (RGB, alpha 0.75/1.0 only) | SE blocks + hard-swish. **Default.** |
+| `v4` | Custom UIB-based `MobileNetV4ConvS` | 0.25, 0.5, 0.75, 1.0 (interpreted as width multiplier) | No | Universal Inverted Bottleneck blocks. |
 
 The backbone extracts features from the input image and produces a feature map. This happens once, regardless of how many heads you have.
 
@@ -32,15 +34,59 @@ All heads share the same backbone features but have separate final layers. This 
 
 **Note**: Models default to linear activation (no softmax) for Vela compiler compatibility. Apply softmax in post-processing when interpreting outputs.
 
+## Feature taps (single-tap)
+
+By default, every head reads the *final* backbone feature map (typically at 1/32 of input resolution). For spatial heads — segmentation, keypoint heatmaps, dense detection — this is wasteful: the head spends compute upsampling features the backbone has already discarded. Each head can instead declare a `tap_stride` that points it at an earlier, higher-resolution layer.
+
+**Naming**: `tap_stride` is the spatial stride relative to input. For a 96×96 input, `tap_stride=8` gives a 12×12 feature map; `tap_stride=16` gives 6×6; `tap_stride=32` (the default) gives 3×3.
+
+**Per-backbone strides exposed**: All four MobileNet backbones expose stride taps at **4, 8, 16, 32**. The architecture-specific class reports the actual layers via `_features_by_stride()`; you can introspect with `arch._features_by_stride(...)` if needed.
+
+**CLI syntax**: append `@STRIDE` to any entry in `--heads`. Without `@`, the head uses the default (final feature map):
+
+```bash
+python src/create_quantized_mobilenet.py \
+    --backbone v3 \
+    --heads "5@32,2@16,3@8" \
+    --output-dir ./out
+```
+
+**What gets shared**: still everything. The backbone is computed once; heads at different strides just pluck different layers out of that single forward pass. No FPN-style fusion network, no extra learnable parameters between backbone and heads.
+
+**Incompatibility**: `--unified-output` is not compatible with heads at `tap_stride < 32` (the unified output concatenates 1D head outputs; spatial heads break that contract). The CLI rejects this combination with a clear error.
+
+**Adding a head later**: `MultiHeadMobileNetArchitecture.add_head_dynamically(tap_stride=...)` attaches a new head to an existing model — typically with `freeze_backbone=True`, so retraining only touches the new head. See `examples/17_dynamic_head_addition.sh` and the [Training Guide](training_guide.md#adding-a-head-later).
+
+**Why not FPN by default?** FPN (feature pyramid networks) adds a learnable fusion layer (lateral 1×1 convs + top-down upsample-and-add) on top of the multi-tap idea, producing richer features at each level. Single-tap is the minimum that handles the "different heads, different scales" use case without introducing shared learnable state between heads — which keeps the freeze-backbone-and-add-a-head workflow clean. FPN is available as an opt-in mode (`--fusion fpn`) without breaking the single-tap API.
+
+## FPN fusion (opt-in)
+
+`--fusion fpn` (or `MultiHeadModelConfig.fusion='fpn'` in the Python API) wraps the per-stride feature taps in a top-down feature pyramid network: at each stride a 1×1 lateral conv projects to `--fpn-channels` (default 128), then going coarse-to-fine the previous level is upsampled (nearest-neighbor) and added to the lateral, and a 3×3 conv smooths the result. Each head consumes the corresponding FPN level instead of the raw backbone feature map.
+
+- **Strides built**: only the strides actually used by heads (plus the coarsest, so heads with `tap_stride=None` have a well-defined FPN level to consume). Unused strides skip the cost.
+- **Head shape contract**: unchanged — classification heads still collapse to 1D via their internal GAP, spatial heads still produce 4D outputs at the FPN level's resolution. Only the *features* they read differ.
+- **Channels**: `--fpn-channels` (default 128) trades model size against representational capacity. For MCU-class targets, 32–64 is plenty.
+- **Hardware**: nearest-neighbor upsample + 3×3 conv compiles cleanly under Vela; no special handling needed.
+- **Frozen-backbone workflow**: FPN convs are learnable and *shared across heads*. If you add a head later with `add_head_dynamically()` and want the freeze guarantee, also freeze the FPN — otherwise gradients from the new head will flow back through the FPN and can shift features the existing heads depend on. Single-tap mode is the recommended choice for that workflow.
+- **Tested via** `examples/20_fpn_fusion.sh` and `tests/test_fpn.py`.
+
 ## Model Size
 
 Model size depends on:
 
-**Backbone**: Determined by alpha parameter
-- Alpha 0.25: ~100K parameters
-- Alpha 0.50: ~400K parameters
-- Alpha 0.75: ~900K parameters
-- Alpha 1.0: ~1.5M parameters
+**Backbone**: Determined by `--backbone` and `--alpha` together. Approximate parameter counts (backbone only):
+
+| alpha | v1 | v2 | v3 | v4 |
+|---|---|---|---|---|
+| 0.25 | ~250K | — | ~100K | ~250K |
+| 0.35 | — | ~250K | — | — |
+| 0.50 | ~1.0M | ~500K | ~400K | ~1.0M |
+| 0.75 | ~2.25M | ~1.1M | ~900K | ~2.25M |
+| 1.0 | ~4.0M | ~2.2M | ~1.5M | ~4.0M |
+| 1.3 | — | ~3.8M | — | — |
+| 1.4 | — | ~4.4M | — | — |
+
+V3-Small is the smallest at every alpha; V1 and V4 are roughly comparable; V2 is in between.
 
 **Heads**: Each head adds roughly ~1000 parameters per class
 - Head with 2 classes: ~2K parameters

@@ -56,7 +56,11 @@ class MultiHeadMobileNetArchitecture(MobileNetArchitecture):
         
         # Store separable weights flag
         self._separable_weights = config.separable_weights
-        
+
+        # Cross-scale fusion settings (None = single-tap, 'fpn' = top-down FPN)
+        self._fusion = config.fusion
+        self._fpn_channels = config.fpn_channels
+
         # Cache for backbone and head models (for separable weights feature)
         self._backbone_model: Optional[tf.keras.Model] = None
         self._head_models: Dict[str, tf.keras.Model] = {}
@@ -301,48 +305,211 @@ class MultiHeadMobileNetArchitecture(MobileNetArchitecture):
         from ..components.head_builders import build_head_for_type
         return build_head_for_type(head_config.head_type, head_config, backbone_output)
     
+    def _build_fpn(
+        self,
+        features: Dict[int, tf.Tensor],
+        used_strides: List[int],
+        fpn_channels: int,
+    ) -> Dict[int, tf.Tensor]:
+        """Build a top-down FPN over the strides actually used by heads.
+
+        Implements the standard FPN pattern (Lin et al. 2017): at each
+        used stride apply a 1x1 lateral conv to project to fpn_channels;
+        going coarse-to-fine, upsample (nearest-neighbor) the previous
+        level and add to the lateral; smooth with a 3x3 conv. Only the
+        strides in ``used_strides`` are built — unused strides skip the
+        cost.
+
+        Args:
+            features: {stride: tensor} from _features_by_stride().
+            used_strides: List of strides heads actually consume.
+            fpn_channels: Channel count for every FPN level.
+
+        Returns:
+            {stride: fpn_tensor} dict, one entry per used stride.
+        """
+        ordered = sorted(set(used_strides), reverse=True)  # coarsest first
+        fpn: Dict[int, tf.Tensor] = {}
+
+        # Top of the pyramid: lateral conv only.
+        top_stride = ordered[0]
+        if top_stride not in features:
+            raise ValueError(
+                f"FPN: backbone has no feature map at stride {top_stride}; "
+                f"available strides: {sorted(features.keys())}"
+            )
+        prev = layers.Conv2D(
+            fpn_channels, 1, padding='same',
+            name=f'fpn_lateral_{top_stride}',
+        )(features[top_stride])
+        fpn[top_stride] = prev
+
+        # Top-down pathway.
+        prev_stride = top_stride
+        for stride in ordered[1:]:
+            if stride not in features:
+                raise ValueError(
+                    f"FPN: backbone has no feature map at stride {stride}; "
+                    f"available strides: {sorted(features.keys())}"
+                )
+            ratio = prev_stride // stride
+            if prev_stride % stride != 0 or ratio < 2:
+                # Non-power-of-2 spacing isn't a supported FPN topology.
+                raise ValueError(
+                    f"FPN: used strides must be a descending chain where each "
+                    f"is a multiple of the next; got {ordered}"
+                )
+            upsampled = layers.UpSampling2D(
+                size=(ratio, ratio),
+                interpolation='nearest',
+                name=f'fpn_up_{prev_stride}_to_{stride}',
+            )(prev)
+            lateral = layers.Conv2D(
+                fpn_channels, 1, padding='same',
+                name=f'fpn_lateral_{stride}',
+            )(features[stride])
+            merged = layers.Add(name=f'fpn_merge_{stride}')([upsampled, lateral])
+            smoothed = layers.Conv2D(
+                fpn_channels, 3, padding='same',
+                name=f'fpn_smooth_{stride}',
+            )(merged)
+            fpn[stride] = smoothed
+            prev = smoothed
+            prev_stride = stride
+
+        return fpn
+
+    def _features_by_stride(
+        self,
+        backbone: tf.keras.Model,
+        input_tensor: tf.Tensor,
+        backbone_output: tf.Tensor,
+    ) -> Dict[int, tf.Tensor]:
+        """Return a {stride: feature_tensor} dict for this backbone.
+
+        Subclasses override this to expose intermediate feature maps at
+        strides 4, 8, 16, 32 (relative to input resolution). The default
+        implementation returns an empty dict — meaning heads with
+        ``tap_stride=None`` continue to receive ``backbone_output``
+        (current behavior), and any head with ``tap_stride`` set will
+        fail validation.
+
+        Args:
+            backbone: The shared backbone Keras model.
+            input_tensor: The model's input tensor (Keras Input layer).
+            backbone_output: The full-depth output of ``backbone(input_tensor)``.
+
+        Returns:
+            Dict mapping stride (int, e.g. 4/8/16/32) to the corresponding
+            feature tensor. Default: ``{}``.
+        """
+        return {}
+
     def build_model(self) -> tf.keras.Model:
         """Build and return the complete multi-head TensorFlow model.
-        
+
         This method creates the complete multi-head model by:
         1. Building the shared backbone
-        2. Creating multiple classification heads
-        3. Connecting heads to backbone outputs
+        2. Computing per-stride feature maps (via _features_by_stride)
+        3. Routing each head to the feature map at its tap_stride
+           (defaulting to the final backbone output when tap_stride is None)
         4. Optionally creating a unified concatenated output
         5. Creating a model with multiple outputs
-        
+
         Returns:
             Compiled TensorFlow Keras model with multiple outputs
-            
+
         Raises:
-            ValueError: If model cannot be built with current configuration
+            ValueError: If model cannot be built with current configuration,
+                or if a head requests a tap_stride that the backbone does
+                not expose.
         """
         # Build the shared backbone
         backbone = self.build_backbone()
-        
+
         # Create input layer
         input_layer = layers.Input(shape=self.config.input_shape, name='input')
-        
+
         # Get backbone output
         backbone_output = backbone(input_layer)
-        
+
+        # Per-stride feature dict (may be empty for the default
+        # implementation; subclasses override to expose stride taps).
+        features = self._features_by_stride(backbone, input_layer, backbone_output)
+
+        # Determine if any head requests a non-default tap; only fault
+        # --unified-output here because spatial-tap heads break the
+        # 1D concatenation contract.
+        spatial_taps = [
+            h for h in self.head_configs
+            if h.tap_stride is not None and h.tap_stride < 32
+        ]
+        if self._unified_output and spatial_taps:
+            spatial_names = [h.name for h in spatial_taps]
+            raise ValueError(
+                "unified_output=True is incompatible with heads that use a "
+                f"non-default tap_stride < 32. Heads with spatial taps: "
+                f"{spatial_names}. Either drop --unified-output or set those "
+                "heads' tap_stride to None (final feature map)."
+            )
+
+        # Optional cross-scale fusion. With fusion='fpn', build an FPN
+        # over the strides actually used by heads, and route heads to
+        # the FPN level instead of the raw backbone feature map.
+        if self._fusion == 'fpn':
+            if not features:
+                raise ValueError(
+                    "fusion='fpn' requires the backbone to expose stride taps "
+                    "(via _features_by_stride), but the current backbone "
+                    "returned an empty dict."
+                )
+            # The set of strides FPN should cover: every head's tap_stride,
+            # plus the coarsest stride (so heads with tap_stride=None get a
+            # well-defined FPN level to consume).
+            coarsest = max(features.keys())
+            used_strides = {
+                (h.tap_stride if h.tap_stride is not None else coarsest)
+                for h in self.head_configs
+            }
+            features = self._build_fpn(
+                features, list(used_strides), self._fpn_channels,
+            )
+            fpn_default = max(features.keys())  # the coarsest FPN level
+        else:
+            fpn_default = None
+
         # Create multiple heads
         outputs = {}
         head_outputs_list = []
         for head_config in self.head_configs:
-            head_output = self.build_head(head_config, backbone_output)
+            if head_config.tap_stride is None:
+                if self._fusion == 'fpn':
+                    head_input = features[fpn_default]
+                else:
+                    head_input = backbone_output
+            else:
+                if head_config.tap_stride not in features:
+                    available = sorted(features.keys()) if features else "none (backbone does not expose stride taps)"
+                    raise ValueError(
+                        f"Head '{head_config.name}' requested tap_stride="
+                        f"{head_config.tap_stride}, but this backbone exposes "
+                        f"only: {available}."
+                    )
+                head_input = features[head_config.tap_stride]
+
+            head_output = self.build_head(head_config, head_input)
             outputs[head_config.name] = head_output
             head_outputs_list.append(head_output)
-        
+
         # Add unified output if requested and model has multiple heads
         if self._unified_output:
             # Concatenate all head outputs in order
             unified_heads = layers.Concatenate(name='unified_heads')(head_outputs_list)
             outputs['unified_heads'] = unified_heads
-        
+
         # Create the complete model
         model = Model(inputs=input_layer, outputs=outputs, name=self.name)
-        
+
         return model
     
     def validate_config(self) -> None:
@@ -571,64 +738,107 @@ class MultiHeadMobileNetArchitecture(MobileNetArchitecture):
         head_name: str,
         activation: str = 'linear',
         dropout_rate: float = 0.2,
-        freeze_backbone: bool = False
+        freeze_backbone: bool = False,
+        tap_stride: Optional[int] = None,
+        head_type: str = 'standard',
     ) -> tf.keras.Model:
         """Add a new head to the existing model dynamically.
-        
-        This method creates a new head and adds it to the model without
-        retraining the backbone. Optionally freeze the backbone to train
-        only the new head.
-        
+
+        Creates a new head and attaches it without retraining the
+        backbone. The new head may tap a different backbone stride
+        than existing heads — useful for adding a dense-prediction head
+        (segmentation/keypoint) to a model that previously only had
+        classification heads at the final feature map.
+
         Args:
             num_classes: Number of classes for the new head
             head_name: Name for the new head
             activation: Activation function ('linear' for Vela compatibility)
             dropout_rate: Dropout rate for the head
-            freeze_backbone: If True, freeze backbone weights
-            
+            freeze_backbone: If True, freeze backbone weights so only the
+                new head trains.
+            tap_stride: If set, route the new head to the backbone feature
+                map at this stride (must be a stride this backbone exposes
+                via _features_by_stride). None = use the final feature map
+                (existing behavior).
+            head_type: Head type string from the head-builder registry
+                (default 'standard' = GAP + Dropout + Dense classification).
+
         Returns:
             Updated model with the new head
-            
+
         Raises:
-            ValueError: If separable_weights is not enabled or head name exists
+            ValueError: If separable_weights is not enabled, head name
+                exists, or the requested tap_stride is not exposed.
         """
         self._check_separable('add_head_dynamically')
-        
+
         if head_name in self.head_names:
             raise ValueError(f"Head '{head_name}' already exists. Choose a different name.")
-        
+
         # Create new head configuration
         new_head_config = HeadConfiguration(
             name=head_name,
             num_classes=num_classes,
             activation=activation,
-            dropout_rate=dropout_rate
+            dropout_rate=dropout_rate,
+            head_type=head_type,
+            tap_stride=tap_stride,
         )
-        
+
         # Get current model
         model = self.get_model()
-        
+
         # Get backbone
         backbone = self.backbone
-        
+
         # Freeze backbone if requested
         if freeze_backbone:
             backbone.trainable = False
             print(f"Backbone frozen for training new head '{head_name}'")
-        
+
         # Get backbone output from the current model
         backbone_output = backbone(model.input)
-        
+
+        # Resolve which feature tensor the new head consumes. For the
+        # default tap (None) we use the backbone output; otherwise we
+        # look up the requested stride.
+        if tap_stride is None:
+            head_input = backbone_output
+        else:
+            features = self._features_by_stride(backbone, model.input, backbone_output)
+            if tap_stride not in features:
+                available = sorted(features.keys()) if features else "none (backbone does not expose stride taps)"
+                raise ValueError(
+                    f"Head '{head_name}' requested tap_stride={tap_stride}, "
+                    f"but this backbone exposes only: {available}."
+                )
+            head_input = features[tap_stride]
+
         # Build new head
-        new_head_output = self.build_head(new_head_config, backbone_output)
+        new_head_output = self.build_head(new_head_config, head_input)
         
-        # Collect all outputs (existing + new)
-        new_outputs = {}
-        for output_name in model.output_names:
-            if output_name != 'unified_heads':  # Skip unified output, will recreate if needed
-                new_outputs[output_name] = model.output[output_name]
+        # Collect all outputs (existing + new). Keras names model.output
+        # by the final layer's name (e.g. "head_1_output"), but build_model
+        # passes a dict keyed by head_config.name, so model.output is a
+        # dict keyed by head names. Iterate that dict directly.
+        existing_outputs = model.output
+        if isinstance(existing_outputs, dict):
+            new_outputs = {
+                name: tensor
+                for name, tensor in existing_outputs.items()
+                if name != 'unified_heads'
+            }
+        else:
+            # Fallback: pair output_names with output tensors positionally.
+            tensors = existing_outputs if isinstance(existing_outputs, (list, tuple)) else [existing_outputs]
+            new_outputs = {
+                name: tensor
+                for name, tensor in zip(model.output_names, tensors)
+                if name != 'unified_heads'
+            }
         new_outputs[head_name] = new_head_output
-        
+
         # Add unified output if it was enabled
         if self._unified_output:
             head_outputs_list = [new_outputs[name] for name in self.head_names + [head_name]]

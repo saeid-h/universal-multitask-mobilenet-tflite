@@ -35,6 +35,12 @@ class MultiHeadModelConfig(ModelConfig):
     loss_weights: Optional[Dict[str, float]] = None
     head_specific_params: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     separable_weights: bool = False
+    # Optional cross-scale feature fusion. None (default) = single-tap:
+    # each head reads its backbone stride directly. 'fpn' = build a
+    # top-down FPN over the strides actually used by heads, and route
+    # heads to the FPN level instead of the raw backbone feature map.
+    fusion: Optional[str] = None
+    fpn_channels: int = 128
     
     def validate(self) -> None:
         """Validate multi-head configuration parameters.
@@ -70,6 +76,16 @@ class MultiHeadModelConfig(ModelConfig):
         valid_inference_modes = {'all_active', 'selective'}
         if self.inference_mode not in valid_inference_modes:
             raise ValueError(f"inference_mode must be one of {valid_inference_modes}, got {self.inference_mode}")
+
+        # Validate fusion mode
+        if self.fusion not in (None, 'fpn'):
+            raise ValueError(
+                f"fusion must be one of (None, 'fpn'), got {self.fusion!r}"
+            )
+        if self.fpn_channels < 1:
+            raise ValueError(
+                f"fpn_channels must be a positive integer, got {self.fpn_channels}"
+            )
         
         # Validate loss weights if provided
         if self.loss_weights is not None:

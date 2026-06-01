@@ -1,6 +1,6 @@
 # Getting Started
 
-This guide helps you set up and create your first quantized MobileNet V3 model.
+This guide helps you set up and create your first quantized MobileNet model. The tool supports four MobileNet backbones — V1, V2, V3-Small, V4 — selectable via `--backbone {v1,v2,v3,v4}` (default `v3`).
 
 ## Prerequisites
 
@@ -24,10 +24,13 @@ pip install tensorflow numpy
 The simplest command creates a model with a single classification head:
 
 ```bash
-python src/create_quantized_mobilenet_v3.py \
+python src/create_quantized_mobilenet.py \
+    --backbone v3 \
     --heads "2" \
     --output-dir ./my_models
 ```
+
+`--backbone` defaults to `v3`. To target a different MobileNet version, pass `v1`, `v2`, or `v4` — output filenames will be auto-prefixed with the backbone version (`mnv1_*`, `mnv2_*`, etc.).
 
 Or use one of the example scripts:
 
@@ -51,7 +54,18 @@ After running the script, you'll find several files in your output directory:
 - `{model_name}_summary.txt` - Human-readable summary of the model
 - `{model_name}_quantization_info.json` - Quantization analysis details
 
-The model name is auto-generated from your configuration. For example, a model with alpha 0.25, heads [5,2], and input shape 224x224x3 would be named `mnv3_0_25_5_2_224x224x3`.
+The model name is auto-generated from your configuration. For example, a model with `--backbone v3 --alpha 0.25 --heads 5,2 --input-shape 224x224x3` would be named `mnv3_0_25_5_2_224x224x3`. The prefix tracks `--backbone`: `mnv1_*`, `mnv2_*`, `mnv3_*`, or `mnv4_*`.
+
+## Choosing a backbone
+
+Quick reference (full details in [API Reference](api_reference.md) and [Architecture](architecture.md)):
+
+| Backbone | Alpha set | ImageNet pretrained | Typical use |
+|---|---|---|---|
+| `v1` | 0.25, 0.5, 0.75, 1.0 | Yes (RGB) | Classic depthwise-separable backbone; well-supported. |
+| `v2` | 0.35, 0.5, 0.75, 1.0, 1.3, 1.4 | Yes (RGB) | Inverted residuals; wider alpha range for size/accuracy trade-offs. |
+| `v3` *(default)* | 0.25, 0.5, 0.75, 1.0 | Yes (RGB, alpha 0.75/1.0 only) | Smallest at every alpha; SE blocks + hard-swish. |
+| `v4` | 0.25, 0.5, 0.75, 1.0 | No | Custom UIB blocks; newer design, no pretrained weights bundled. |
 
 ## Example Scripts
 

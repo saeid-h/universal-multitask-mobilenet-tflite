@@ -62,23 +62,26 @@ def _normalize_dtype_string(dtype_str: str) -> str:
 def generate_output_name(
     alpha: float,
     input_shape: Tuple[int, int, int],
-    head_classes: List[int]
+    head_classes: List[int],
+    backbone: str = 'v3'
 ) -> str:
     """
     Generate output filename from configuration.
-    
+
     Args:
         alpha: Width multiplier
         input_shape: Input shape as (height, width, channels)
         head_classes: List of class counts per head
-        
+        backbone: MobileNet backbone version ('v1', 'v2', 'v3', or 'v4').
+                  Determines the filename prefix (mnv1_/mnv2_/mnv3_/mnv4_).
+
     Returns:
         Generated filename base (without extension)
     """
     h, w, c = input_shape
     alpha_str = str(alpha).replace('.', '_')
     head_str = '_'.join(map(str, head_classes))
-    return f"mnv3_{alpha_str}_{head_str}_{h}x{w}x{c}"
+    return f"mn{backbone}_{alpha_str}_{head_str}_{h}x{w}x{c}"
 
 
 def save_model_report(

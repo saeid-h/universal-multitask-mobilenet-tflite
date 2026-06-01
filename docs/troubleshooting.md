@@ -12,7 +12,7 @@ Common issues and their solutions.
 - Remove `--use-pretrained` flag
 - Change to `--alpha 0.75` or `--alpha 1.0`
 
-Alpha 0.25 and 0.50 don't have pretrained weights in Keras MobileNet V3.
+Alpha 0.25 and 0.50 don't have pretrained weights in Keras MobileNet V3. If you're on a different backbone, see the [pretrained-weight availability table](api_reference.md#--use-pretrained) — V1 and V2 support all alphas with ImageNet; V4 has no bundled pretrained weights.
 
 ### "Invalid input shape format"
 
@@ -70,7 +70,7 @@ You need at least one of these arguments.
 **Problem**: The quantization info shows float32 tensors present.
 
 **Possible causes**:
-- Some operations can't be quantized (rare with MobileNet V3)
+- Some operations can't be quantized (rare with V1/V2/V3, slightly more likely with the custom V4 UIB blocks)
 - Calibration dataset issues
 - Model complexity
 
@@ -149,7 +149,7 @@ You need at least one of these arguments.
 **Problem**: Python can't find the models module.
 
 **Solution**:
-- Run the script from the repository root directory: `python src/create_quantized_mobilenet_v3.py`
+- Run the script from the repository root directory: `python src/create_quantized_mobilenet.py`
 - Ensure you're using the correct Python environment
 - Check that the models package exists in the expected location
 - Verify you're in the project root when running scripts
